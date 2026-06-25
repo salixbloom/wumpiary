@@ -1,17 +1,30 @@
 {
   "name": "wumpiary",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Multi-account Discord wrapper — Phase 0 resource/stability spike",
-  "main": "dist/main.js",
+  "description": "Multi-account Discord wrapper — keep every account connected, notified, and isolated.",
+  "author": "Willow Bloom",
+  "main": "out/main/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "spike": "npm run build && xvfb-run -a electron .",
-    "spike:throttle": "npm run build && BG_THROTTLE=1 xvfb-run -a electron ."
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "boot": "electron-vite build && xvfb-run -a electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
     "electron": "^31.0.0",
-    "typescript": "^5.4.0"
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zustand": "^4.5.0"
   }
 }
