@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron';
+import { app, BrowserWindow, ipcMain, powerMonitor, session } from 'electron';
 import * as path from 'path';
 import { ConfigStore } from './config';
 import { Vault } from './vault';
@@ -26,6 +26,7 @@ class AppController {
   private stateTimer: NodeJS.Timeout | null = null;
 
   start() {
+    this.applyChromeCsp();
     this.createWindow();
     this.accounts = new AccountManager(this.win, path.join(__dirname, '../preload/account-observer.js'), this.cfg, (id, patch) => this.onRuntime(id, patch));
     this.router = new NotificationRouter(
@@ -59,6 +60,20 @@ class AppController {
     // Always start locked: nothing is decrypted and no account view is created
     // until the user authenticates (or sets a PIN on first run).
     this.accounts.setOverlay(true);
+  }
+
+  /**
+   * Lock down the chrome UI with a strict CSP in production only. In dev we skip
+   * it so Vite's HMR / React-Refresh inline preamble works. This applies to the
+   * default session (the chrome window); account views use their own partitions
+   * and keep Discord's own CSP untouched.
+   */
+  private applyChromeCsp() {
+    if (process.env['ELECTRON_RENDERER_URL']) return; // dev
+    const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; media-src 'self' file:; connect-src 'self'";
+    session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+      cb({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
+    });
   }
 
   private createWindow() {
