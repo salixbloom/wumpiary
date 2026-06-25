@@ -17,6 +17,10 @@ import * as crypto from 'crypto';
 const VAULT_FILE = () => path.join(app.getPath('userData'), 'vault.bin');
 const SECRET_FILE = () => path.join(app.getPath('userData'), 'secrets.bin');
 
+// scrypt cost params. N=2^15,r=8 needs ~32MB, which is exactly Node's default
+// maxmem ceiling and throws ERR_CRYPTO_INVALID_SCRYPT_PARAMS — so raise maxmem.
+const SCRYPT_PARAMS: crypto.ScryptOptions = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+
 interface WrappedBlob {
   salt: string;
   iv: string;
@@ -55,7 +59,7 @@ export class Vault {
   unlock(pin: string): boolean {
     try {
       const blob = this.readWrapped();
-      const pinKey = crypto.scryptSync(pin, Buffer.from(blob.salt, 'base64'), 32, { N: 1 << 15, r: 8, p: 1 });
+      const pinKey = crypto.scryptSync(pin, Buffer.from(blob.salt, 'base64'), 32, SCRYPT_PARAMS);
       const decipher = crypto.createDecipheriv('aes-256-gcm', pinKey, Buffer.from(blob.iv, 'base64'));
       decipher.setAuthTag(Buffer.from(blob.tag, 'base64'));
       const vaultKey = Buffer.concat([decipher.update(Buffer.from(blob.wrapped, 'base64')), decipher.final()]);
@@ -103,7 +107,7 @@ export class Vault {
 
   private writeWrapped(vaultKey: Buffer, pin: string): void {
     const salt = crypto.randomBytes(16);
-    const pinKey = crypto.scryptSync(pin, salt, 32, { N: 1 << 15, r: 8, p: 1 });
+    const pinKey = crypto.scryptSync(pin, salt, 32, SCRYPT_PARAMS);
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', pinKey, iv);
     const wrapped = Buffer.concat([cipher.update(vaultKey), cipher.final()]);
