@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>heavy</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #313338; color: #ddd; font-family: sans-serif; overflow: hidden; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="1200" height="800"></canvas>
+    <script>
+      // Synthetic stand-in for Discord's heavy SPA: a continuous repaint loop
+      // (constant compositing/paint work) plus a non-trivial retained heap.
+      // The point is to create realistic background render cost so we can measure
+      // what un-rendering (detaching the view) actually saves.
+
+      // Retained memory footprint (~40MB) to imitate a loaded client.
+      const ballast = [];
+      for (let i = 0; i < 40; i++) ballast.push(new Uint8Array(1024 * 1024).fill(i));
+      // expose so it isn't GC'd
+      window.__ballast = ballast;
+
+      const c = document.getElementById('c');
+      const ctx = c.getContext('2d');
+      let t = 0;
+      function frame() {
+        t += 0.02;
+        ctx.fillStyle = '#313338';
+        ctx.fillRect(0, 0, c.width, c.height);
+        for (let i = 0; i < 200; i++) {
+          const x = (Math.sin(t + i) * 0.5 + 0.5) * c.width;
+          const y = (Math.cos(t * 1.3 + i) * 0.5 + 0.5) * c.height;
+          ctx.fillStyle = `hsl(${(i * 7 + t * 50) % 360},70%,60%)`;
+          ctx.beginPath();
+          ctx.arc(x, y, 14, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+
+      // Timer-driven CPU load (~25ms work every 250ms). Unlike the paint loop,
+      // this is throttle-sensitive the same way a gateway heartbeat is: if
+      // Chromium throttles background timers it stalls too. It also gives a CPU
+      // signal that is measurable under headless software rendering.
+      setInterval(() => {
+        const end = performance.now() + 25;
+        let x = 0;
+        while (performance.now() < end) x += Math.sqrt(x + 1);
+        window.__sink = x;
+      }, 250);
+    </script>
+  </body>
+</html>
