@@ -1,4 +1,4 @@
 node_modules/
 dist/
-report-throttle-*.json
+report-*.json
 *.log
