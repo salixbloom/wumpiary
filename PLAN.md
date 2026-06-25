@@ -43,6 +43,8 @@ This creates a direct tension with the usual Electron optimization of hibernatin
 
 This is the single most important design constraint and **must be validated in a spike (Phase 0) before anything else is built.**
 
+> **✅ Validated (Phase 0 spike — see `SPIKE_FINDINGS.md`).** Measured over a 7-minute background hold: with Chromium's default `backgroundThrottling`, a hidden account's heartbeat collapsed to ~1 beat/minute within ~90 s (320 s drift) — effectively dead. With `backgroundThrottling: false`, it stayed at 2 ms drift, flat, for the full hold. The setting is mandatory and sufficient. Un-rendering non-active views (`setVisible(false)`) keeps them connected at zero stability cost; **hibernation (destroying the WebContents) is the only RAM-reclaim lever (~170 MB+/account) and necessarily takes the account offline.**
+
 ---
 
 ## 4. Architecture
@@ -438,6 +440,7 @@ Estimates are rough engineering-effort guides for a single developer, not commit
 - [ ] Verify both gateway connections stay alive while backgrounded; confirm `backgroundThrottling: false` keeps heartbeats alive through minimize and sleep/wake.
 - [ ] Prove preload notification interception + account tagging.
 - **GATE:** if simultaneous background notifications don't work reliably, stop and solve this before building UI. **Exit criterion:** documented evidence both accounts notify simultaneously across minimize + sleep/wake + network drop.
+- **Status:** core background-connection gate **PASSED** — see `SPIKE_FINDINGS.md`. Remaining Phase-0 checks (real Discord logins, real sleep/wake + network-drop, GPU-desktop paint savings) are tracked there as follow-ups.
 
 ### Phase 1 — MVP · ~2–3 weeks
 - [ ] Right-hand collapsible sidebar with perches (expand/collapse, drag-width, persisted).

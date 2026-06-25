@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+report-*.json
+boot-*.json
+boot-*.png
+boot-*.txt
+*.log
