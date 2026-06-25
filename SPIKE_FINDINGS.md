@@ -61,6 +61,13 @@ Manual `global.gc()` (via `--js-flags=--expose-gc`) on idle background views rec
 
 ---
 
+## 5. Follow-up: gateway-like WebSocket + reconnection (prototype)
+A dependency-free RFC 6455 WS server (`src/ws-server.ts`) plus an auto-reconnecting client page (`src/heavy-ws.html`) prototype the real connection lifecycle:
+- **WS exemption:** with an active socket and `backgroundThrottling:false`, hidden views hold a flat <2 ms heartbeat (as expected). Chromium also *partially* exempts WS-bearing pages from intensive throttling even when throttling is on — but since `backgroundThrottling:false` already guarantees the heartbeat, we don't depend on it. (Full throttle:true exemption matrix left to validate live.)
+- **Reconnection:** the client observes `onclose` → reports `reconnecting` → retries with capped backoff → `connected`, all while the view is hidden (works because `backgroundThrottling:false` keeps the retry timer firing). This is the basis for the in-app connection-state dots and the connection-health panel.
+
+These map directly into the app's `account-observer` preload (state reporting) and the AccountManager (the views are kept connected in the background).
+
 ## How to reproduce
 ```bash
 npm install
