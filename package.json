@@ -1,0 +1,17 @@
+{
+  "name": "wumpiary",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Multi-account Discord wrapper — Phase 0 resource/stability spike",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "spike": "npm run build && xvfb-run -a electron .",
+    "spike:throttle": "npm run build && BG_THROTTLE=1 xvfb-run -a electron ."
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "electron": "^31.0.0",
+    "typescript": "^5.4.0"
+  }
+}
