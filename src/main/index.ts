@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, IpcMainInvokeEvent, IpcMainEvent, net, powerMonitor, protocol, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, IpcMainInvokeEvent, IpcMainEvent, Menu, net, powerMonitor, protocol, session } from 'electron';
+import type { MenuItemConstructorOptions } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import { pathToFileURL } from 'url';
@@ -39,6 +40,9 @@ class AppController {
   });
 
   start() {
+    // Brand Windows toast notifications (and group them in the Action Center)
+    // under our own AppUserModelID instead of the generic Electron default.
+    if (process.platform === 'win32') app.setAppUserModelId('com.wumpiary.app');
     this.applyChromeCsp();
     this.registerAppProtocol();
     this.createWindow();
@@ -75,6 +79,13 @@ class AppController {
     }
     this.registerIpc();
     this.startTimers();
+
+    // Diagnostic: confirm hardware video decode is available (black/absent call
+    // streams are usually a decode/GPU problem). Logged once at startup.
+    try {
+      const gpu = app.getGPUFeatureStatus() as unknown as Record<string, string>;
+      console.log('[gpu] video_decode:', gpu.video_decode, '| gpu_compositing:', gpu.gpu_compositing);
+    } catch { /* not available */ }
 
     registerHotkeys({
       nextAccount: () => this.cycle(1),
@@ -283,6 +294,92 @@ class AppController {
     this.win.focus();
   }
 
+  private snoozeAccount(id: string, until: number | null) {
+    this.cfg.update((c) => { if (c.accounts[id]) c.accounts[id].notifications.snoozeUntil = until; });
+    this.scheduleState();
+  }
+
+  private setMuted(id: string, muted: boolean) {
+    this.cfg.update((c) => { if (c.accounts[id]) c.accounts[id].notifications.muted = muted; });
+    this.scheduleState();
+  }
+
+  private confirmForget(id: string) {
+    const acc = this.cfg.get().accounts[id];
+    if (!acc) return;
+    const choice = dialog.showMessageBoxSync(this.win, {
+      type: 'warning',
+      buttons: ['Cancel', 'Forget'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Forget account',
+      message: `Forget "${acc.nickname}"?`,
+      detail: 'This wipes its session and removes it from wumpiary.',
+    });
+    if (choice === 1) this.accounts.forget(id);
+  }
+
+  /**
+   * Native per-account right-click menu. Built in main (not HTML) so it composites
+   * ABOVE the Discord WebContentsView — an HTML menu can never rise above a native
+   * child view regardless of z-index.
+   */
+  private showAccountMenu(id: string) {
+    const c = this.cfg.get();
+    const acc = c.accounts[id];
+    if (!acc) return;
+    const signedOut = (this.runtime[id]?.connection ?? 'offline') === 'signed-out';
+    const hasSavedPassword = !!(this.vault.unlocked && this.vault.listCredentials()[id]?.password);
+
+    const snooze = (mins: number | 'tomorrow' | 'clear') => {
+      if (mins === 'clear') return this.snoozeAccount(id, null);
+      if (mins === 'tomorrow') {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        d.setHours(9, 0, 0, 0);
+        return this.snoozeAccount(id, d.getTime());
+      }
+      return this.snoozeAccount(id, Date.now() + mins * 60_000);
+    };
+
+    const template: MenuItemConstructorOptions[] = [
+      { label: acc.nickname, enabled: false },
+      { type: 'separator' },
+    ];
+    if (signedOut && hasSavedPassword) {
+      template.push({ label: 'Autofill sign-in…', click: () => this.promptAutofillIfUseful(id) });
+      template.push({ type: 'separator' });
+    }
+    template.push(
+      {
+        label: acc.notifications.muted ? 'Unmute notifications' : 'Mute notifications',
+        click: () => this.setMuted(id, !acc.notifications.muted),
+      },
+      {
+        label: 'Snooze',
+        submenu: [
+          { label: '15 minutes', click: () => snooze(15) },
+          { label: '1 hour', click: () => snooze(60) },
+          { label: 'Until tomorrow', click: () => snooze('tomorrow') },
+          { label: 'Clear snooze', click: () => snooze('clear') },
+        ],
+      },
+      { type: 'separator' },
+      {
+        label: acc.hibernated ? 'Wake account' : 'Hibernate (save RAM, stops notifications)',
+        click: () => { this.accounts.setHibernated(id, !acc.hibernated); this.scheduleState(); },
+      },
+      { label: 'Reload', enabled: !acc.hibernated, click: () => this.accounts.reload(id) },
+      { label: 'Account settings…', click: () => this.win.webContents.send(IPC.openAccountSettings, { accountId: id }) },
+      { label: 'Open devtools', enabled: !acc.hibernated, click: () => this.accounts.openDevtools(id) },
+      { type: 'separator' },
+      { label: 'Quick sign out (keep perch)', click: () => this.accounts.signOut(id) },
+      { label: 'Forget account…', click: () => this.confirmForget(id) },
+    );
+
+    Menu.buildFromTemplate(template).popup({ window: this.win });
+  }
+
   private applyGlobal() {
     const g = this.cfg.get().global;
     app.setLoginItemSettings({ openAtLogin: g.autoLaunch, openAsHidden: g.startMinimized });
@@ -455,10 +552,8 @@ class AppController {
       this.scheduleState();
     }));
 
-    invoke(IPC.snooze, RendererSchemas.snooze, (_e, id, until) => guard(() => {
-      this.cfg.update((c) => { if (c.accounts[id]) c.accounts[id].notifications.snoozeUntil = until; });
-      this.scheduleState();
-    }));
+    invoke(IPC.snooze, RendererSchemas.snooze, (_e, id, until) => guard(() => this.snoozeAccount(id, until)));
+    invoke(IPC.showAccountMenu, RendererSchemas.showAccountMenu, (_e, id) => guard(() => this.showAccountMenu(id)));
 
     invoke(IPC.patchUi, RendererSchemas.patchUi, (_e, patch: Partial<UiConfig>) => guard(() => this.patchUi(patch)));
     invoke(IPC.patchGlobal, RendererSchemas.patchGlobal, (_e, patch: GlobalPatch) => guard(() => this.patchGlobal(patch)));

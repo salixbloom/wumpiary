@@ -69,6 +69,10 @@ const INJECT = `(() => {
       ptt.enabled = !!(state && state.enabled);
       ptt.pressed = !!(state && state.pressed);
       updateGains();
+      // Green-ring your own avatar(s) while the key is held (see PTT_HELD_CSS).
+      try {
+        document.documentElement.classList.toggle('wump-ptt-held', ptt.enabled && ptt.pressed);
+      } catch (e) {}
     };
     const wantsAudio = (constraints) => {
       if (!constraints) return false;

@@ -17,6 +17,9 @@ export function App() {
   // has a saved login is activated (e.g. via the "signed out" notification).
   useEffect(() => api.onPromptAutofill(({ accountId }) => setAutofillId(accountId)), []);
 
+  // Native account context menu (main process) asks us to open Settings → Account.
+  useEffect(() => api.onOpenAccountSettings(({ accountId }) => { setSettingsAccount(accountId); setTab('account'); }), []);
+
   useEffect(() => {
     if (!state) return;
     const t = state.config.ui.theme;
@@ -64,8 +67,7 @@ export function App() {
     <Sidebar
       state={state}
       onOpenSettings={() => setTab('general')}
-      onAccountSettings={(id) => { setSettingsAccount(id); setTab('account'); }}
-      onAutofill={(id) => setAutofillId(id)}
+      onOpenInbox={() => setTab('activity')}
     />
   );
 

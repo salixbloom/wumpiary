@@ -26,6 +26,7 @@ const api = {
   reorder: (order: string[]) => ipcRenderer.invoke(IPC.reorder, order),
   updateAccount: (id: string, patch: AccountPatch) => ipcRenderer.invoke(IPC.updateAccount, id, patch),
   snooze: (id: string, until: number | null) => ipcRenderer.invoke(IPC.snooze, id, until),
+  showAccountMenu: (id: string) => ipcRenderer.invoke(IPC.showAccountMenu, id),
 
   patchUi: (patch: Partial<UiConfig>) => ipcRenderer.invoke(IPC.patchUi, patch),
   patchGlobal: (patch: GlobalPatch) => ipcRenderer.invoke(IPC.patchGlobal, patch),
@@ -64,6 +65,11 @@ const api = {
     const l = (_e: unknown, p: { accountId: string }) => cb(p);
     ipcRenderer.on(IPC.promptAutofill, l);
     return () => ipcRenderer.removeListener(IPC.promptAutofill, l);
+  },
+  onOpenAccountSettings: (cb: (p: { accountId: string }) => void): (() => void) => {
+    const l = (_e: unknown, p: { accountId: string }) => cb(p);
+    ipcRenderer.on(IPC.openAccountSettings, l);
+    return () => ipcRenderer.removeListener(IPC.openAccountSettings, l);
   },
 };
 

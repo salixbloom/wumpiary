@@ -1,19 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { api } from './store';
 import type { AccountConfig, AccountRuntime, AppState, ConnectionState } from '../shared/types';
 
 interface SidebarProps {
   state: AppState;
   onOpenSettings: () => void;
-  onAccountSettings: (id: string) => void;
-  onAutofill: (id: string) => void;
+  onOpenInbox: () => void;
 }
 
-export function Sidebar({ state, onOpenSettings, onAccountSettings, onAutofill }: SidebarProps) {
+export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
   const ui = state.config.ui;
   const collapsed = ui.sidebarCollapsed;
   const order = state.config.accountsOrder;
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const dragId = useRef<string | null>(null);
 
   const drop = (targetId: string) => {
@@ -32,7 +30,12 @@ export function Sidebar({ state, onOpenSettings, onAccountSettings, onAutofill }
           {ui.sidebarSide === 'right' ? (collapsed ? '‹' : '›') : collapsed ? '›' : '‹'}
         </button>
         {!collapsed && <span className="brand">wumpiary</span>}
-        {!collapsed && state.totalMentions > 0 && <span className="brand-badge">{state.totalMentions}</span>}
+        <button className="inbox-btn" title="Inbox — notifications from all accounts" onClick={onOpenInbox}>
+          <InboxIcon />
+          {state.totalMentions > 0 && (
+            <span className="inbox-badge">{state.totalMentions > 99 ? '99+' : state.totalMentions}</span>
+          )}
+        </button>
       </div>
 
       <div className="perches">
@@ -44,13 +47,13 @@ export function Sidebar({ state, onOpenSettings, onAccountSettings, onAutofill }
             active={state.activeId === id}
             collapsed={collapsed}
             onClick={() => api.setActive(id)}
-            onContext={(e) => { e.preventDefault(); setMenu({ id, x: e.clientX, y: e.clientY }); }}
+            onContext={(e) => { e.preventDefault(); api.showAccountMenu(id); }}
             onDragStart={() => (dragId.current = id)}
             onDrop={() => drop(id)}
           />
         ))}
         <button className="perch add" onClick={() => api.addAccount()} title="Add account">
-          <span className="avatar add-avatar">+</span>
+          <span className="avatar add-avatar"><PlusIcon /></span>
           {!collapsed && <span className="perch-label">Add account</span>}
         </button>
       </div>
@@ -62,19 +65,6 @@ export function Sidebar({ state, onOpenSettings, onAccountSettings, onAutofill }
         <button className="icon-btn" title="Settings" onClick={onOpenSettings}>⚙</button>
         <button className="icon-btn" title="Lock" disabled={!state.hasVault} onClick={() => api.lock()}>🔒</button>
       </div>
-
-      {menu && (
-        <ContextMenu
-          account={state.config.accounts[menu.id]}
-          signedOut={(state.runtime[menu.id]?.connection ?? 'offline') === 'signed-out'}
-          hasSavedPassword={!!state.savedLogins?.[menu.id]?.password}
-          x={menu.x}
-          y={menu.y}
-          onClose={() => setMenu(null)}
-          onSettings={() => onAccountSettings(menu.id)}
-          onAutofill={() => onAutofill(menu.id)}
-        />
-      )}
     </div>
   );
 }
@@ -136,6 +126,23 @@ function Perch({
   );
 }
 
+function PlusIcon() {
+  return (
+    <svg className="add-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 3v10M3 8h10" />
+    </svg>
+  );
+}
+
+function InboxIcon() {
+  return (
+    <svg className="inbox-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.6 9.3 4.2 4.1a1 1 0 0 1 .96-.7h5.68a1 1 0 0 1 .96.7l1.6 5.2" />
+      <path d="M2.6 9.3h3.2l.8 1.5h2.8l.8-1.5h3.2v2.4a1 1 0 0 1-1 1H3.6a1 1 0 0 1-1-1z" />
+    </svg>
+  );
+}
+
 function Avatar({ account }: { account: AccountConfig }) {
   if (account.avatarOverride) {
     return <img className="avatar" src={account.avatarOverride.startsWith('file:') ? account.avatarOverride : `file://${account.avatarOverride}`} alt={account.nickname} />;
@@ -144,81 +151,3 @@ function Avatar({ account }: { account: AccountConfig }) {
   return <span className="avatar" style={{ background: account.color }}>{initials}</span>;
 }
 
-function ContextMenu({
-  account, signedOut, hasSavedPassword, x, y, onClose, onSettings, onAutofill,
-}: {
-  account: AccountConfig;
-  signedOut: boolean;
-  hasSavedPassword: boolean;
-  x: number;
-  y: number;
-  onClose: () => void;
-  onSettings: () => void;
-  onAutofill: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const margin = 8;
-    const rect = el.getBoundingClientRect();
-    setPos({
-      x: Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin)),
-      y: Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin)),
-    });
-  }, [x, y, signedOut, hasSavedPassword, account.notifications.muted, account.hibernated]);
-
-  useEffect(() => {
-    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [onClose]);
-
-  const act = (fn: () => void) => () => { fn(); onClose(); };
-  const snooze = (mins: number | 'tomorrow' | 'clear') => {
-    if (mins === 'clear') return api.snooze(account.id, null);
-    if (mins === 'tomorrow') {
-      const d = new Date();
-      d.setDate(d.getDate() + 1);
-      d.setHours(9, 0, 0, 0);
-      return api.snooze(account.id, d.getTime());
-    }
-    return api.snooze(account.id, Date.now() + mins * 60_000);
-  };
-
-  return (
-    <div className="context-menu" ref={ref} style={{ left: pos.x, top: pos.y }}>
-      <div className="cm-title">{account.nickname}</div>
-      {signedOut && hasSavedPassword && (
-        <>
-          <button className="cm-highlight" onClick={act(onAutofill)}>Autofill sign-in…</button>
-          <hr />
-        </>
-      )}
-      <button onClick={act(() => api.updateAccount(account.id, { notifications: { muted: !account.notifications.muted } }))}>
-        {account.notifications.muted ? 'Unmute notifications' : 'Mute notifications'}
-      </button>
-      <div className="cm-sub">Snooze</div>
-      <div className="cm-row">
-        <button onClick={act(() => snooze(15))}>15m</button>
-        <button onClick={act(() => snooze(60))}>1h</button>
-        <button onClick={act(() => snooze('tomorrow'))}>Tomorrow</button>
-        <button onClick={act(() => snooze('clear'))}>Clear</button>
-      </div>
-      <hr />
-      <button onClick={act(() => api.setHibernated(account.id, !account.hibernated))}>
-        {account.hibernated ? 'Wake account' : 'Hibernate (save RAM, stops notifications)'}
-      </button>
-      <button onClick={act(() => api.reload(account.id))} disabled={account.hibernated}>Reload</button>
-      <button onClick={act(onSettings)}>Account settings…</button>
-      <button onClick={act(() => api.openDevtools(account.id))} disabled={account.hibernated}>Open devtools</button>
-      <hr />
-      <button onClick={act(() => api.signOut(account.id))}>Quick sign out (keep perch)</button>
-      <button className="danger" onClick={act(() => { if (confirm(`Forget "${account.nickname}"? This wipes its session and removes it.`)) api.forget(account.id); })}>
-        Forget account…
-      </button>
-    </div>
-  );
-}

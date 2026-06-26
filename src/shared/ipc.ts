@@ -18,6 +18,7 @@ export const IPC = {
   openDevtools: 'accounts:devtools',
   updateAccount: 'accounts:update',
   snooze: 'accounts:snooze',
+  showAccountMenu: 'accounts:showMenu', // pop the native per-account right-click menu
   patchUi: 'settings:patchUi',
   patchGlobal: 'settings:patchGlobal',
   setOverlay: 'ui:setOverlay', // hide account views while a full-window modal is open
@@ -43,6 +44,7 @@ export const IPC = {
   playChime: 'app:playChime',
   playSound: 'app:playSound',
   promptAutofill: 'app:promptAutofill', // ask the renderer to open the autofill PIN modal
+  openAccountSettings: 'app:openAccountSettings', // native menu -> renderer: open Settings on an account
 
   // account-observer preload <-> main
   obMetrics: 'observer:metrics',
