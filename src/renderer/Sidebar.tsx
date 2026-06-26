@@ -32,8 +32,8 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
         {!collapsed && <span className="brand">wumpiary</span>}
         <button className="inbox-btn" title="Inbox — notifications from all accounts" onClick={onOpenInbox}>
           <InboxIcon />
-          {state.totalMentions > 0 && (
-            <span className="inbox-badge">{state.totalMentions > 99 ? '99+' : state.totalMentions}</span>
+          {state.activity.length > 0 && (
+            <span className="inbox-badge">{state.activity.length > 99 ? '99+' : state.activity.length}</span>
           )}
         </button>
       </div>

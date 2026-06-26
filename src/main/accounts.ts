@@ -9,20 +9,20 @@ const DISCORD_LOGIN_URL = 'https://discord.com/login';
 const TITLE_BAR_HEIGHT = 34;
 
 // Cosmetic CSS injected into every Discord view to show, with a green ring around
-// your own avatar, that you're currently holding the push-to-talk key. The class
-// `wump-ptt-held` is toggled on <html> by the observer (account-observer.ts) from
-// PTT state. Selectors target Discord's (hashed) classnames best-effort — they
-// hit the bottom-left user panel avatar and the voice-connected widget avatar
-// (both are *your* avatar) and override Discord's voice-activity speaking ring.
-// Update the selectors here if Discord changes its markup.
+// your own avatar, that you're currently holding the push-to-talk key.
+//   - `.wump-me-ptt` is added by the observer (account-observer.ts) to *your*
+//     avatar wherever it appears in a voice/call/panel context (bottom-left pfp,
+//     the voice-connected panel, your tile inside a call) — identified by your
+//     user id, so it covers every scenario at once.
+//   - `html.wump-ptt-held` is a fallback that rings the bottom-left user panel
+//     even when you have no custom avatar (so there's no user id to match).
+// Both override Discord's voice-activity speaking ring. Update if Discord changes
+// its markup.
+const PTT_RING = 'box-shadow: 0 0 0 2px #23a559, 0 0 9px 1px rgba(35, 165, 89, 0.75) !important; border-radius: 50% !important; transition: box-shadow 0.08s ease;';
 const PTT_HELD_CSS = `
+.wump-me-ptt { ${PTT_RING} }
 html.wump-ptt-held [class*="panels_"] [class*="avatar_"],
-html.wump-ptt-held [class*="avatarWrapper_"] [class*="avatar_"],
-html.wump-ptt-held [class*="container_"] > [class*="avatar_"] {
-  box-shadow: 0 0 0 2px #23a559, 0 0 9px 1px rgba(35, 165, 89, 0.75) !important;
-  border-radius: 50% !important;
-  transition: box-shadow 0.08s ease;
-}
+html.wump-ptt-held [class*="avatarWrapper_"] [class*="avatar_"] { ${PTT_RING} }
 `;
 
 /**

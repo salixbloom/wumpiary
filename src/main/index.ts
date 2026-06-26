@@ -41,8 +41,12 @@ class AppController {
 
   start() {
     // Brand Windows toast notifications (and group them in the Action Center)
-    // under our own AppUserModelID instead of the generic Electron default.
-    if (process.platform === 'win32') app.setAppUserModelId('com.wumpiary.app');
+    // under our own AppUserModelID. Only do this when packaged: the installer
+    // registers a Start-Menu shortcut carrying this exact AUMID, which Windows
+    // needs to resolve the toast. In dev there is no such shortcut, so overriding
+    // it would make Windows silently drop every notification — keep Electron's
+    // working default there.
+    if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId('com.wumpiary.app');
     this.applyChromeCsp();
     this.registerAppProtocol();
     this.createWindow();

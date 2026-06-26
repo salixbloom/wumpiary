@@ -65,14 +65,44 @@ const INJECT = `(() => {
         }
       }
     };
+    // Read your own user id from the bottom-left panel avatar's image URL so we
+    // can ring every place that same avatar appears (voice panel, call tile, …).
+    const myUserId = () => {
+      try {
+        const img = document.querySelector('[class*="panels_"] img[src*="/avatars/"], [class*="avatarWrapper"] img[src*="/avatars/"]');
+        const src = img && img.getAttribute('src');
+        const m = src && src.match(/\\/avatars\\/(\\d+)\\//);
+        return m ? m[1] : null;
+      } catch (e) { return null; }
+    };
+    const setPttRing = (on) => {
+      try {
+        if (on) {
+          const uid = myUserId();
+          if (uid) {
+            // Restrict to voice/call/panel contexts so we don't light up your
+            // avatar next to every chat message you've sent.
+            const scopes = document.querySelectorAll('[class*="panels_"], section[class*="panel"], [class*="voiceUser"], [class*="tile_"], [class*="participant"], [class*="callContainer"], [class*="participantsWrapper"]');
+            scopes.forEach((scope) => {
+              scope.querySelectorAll('img[src*="/avatars/' + uid + '/"]').forEach((img) => {
+                const wrap = img.closest('[class*="avatar"]') || img.parentElement || img;
+                if (wrap) wrap.classList.add('wump-me-ptt');
+              });
+            });
+          }
+        } else {
+          document.querySelectorAll('.wump-me-ptt').forEach((el) => el.classList.remove('wump-me-ptt'));
+        }
+      } catch (e) {}
+    };
     window.__wumpSetPushToTalk = (state) => {
       ptt.enabled = !!(state && state.enabled);
       ptt.pressed = !!(state && state.pressed);
       updateGains();
       // Green-ring your own avatar(s) while the key is held (see PTT_HELD_CSS).
-      try {
-        document.documentElement.classList.toggle('wump-ptt-held', ptt.enabled && ptt.pressed);
-      } catch (e) {}
+      const held = ptt.enabled && ptt.pressed;
+      try { document.documentElement.classList.toggle('wump-ptt-held', held); } catch (e) {}
+      setPttRing(held);
     };
     const wantsAudio = (constraints) => {
       if (!constraints) return false;
