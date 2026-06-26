@@ -1,0 +1,54 @@
+appId: com.wumpiary.app
+productName: Wumpiary
+copyright: Copyright © 2026 Willow Bloom
+
+# Bundle the built output (out/) plus the runtime package manifest. Source,
+# tests and dev tooling are excluded by only listing what the app needs.
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+
+asar: true
+# electron-builder reads electronVersion from the installed `electron` dep.
+
+# ---- Linux ----------------------------------------------------------------
+linux:
+  category: Network
+  icon: build/icon.png
+  target:
+    - AppImage
+    - deb
+  desktop:
+    entry:
+      StartupWMClass: Wumpiary
+
+# ---- Windows --------------------------------------------------------------
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+# ---- macOS ----------------------------------------------------------------
+mac:
+  category: public.app-category.social-networking
+  icon: build/icon.png
+  target:
+    - dmg
+  hardenedRuntime: true
+  # Signing/notarization credentials are supplied via CI env vars at release
+  # time (CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID …); unset = unsigned local build.
+
+# ---- Auto-update ----------------------------------------------------------
+# No publish provider is configured yet, so packaged builds ship without an
+# update feed (updater stays dormant — see src/main/updater.ts). Add a
+# `publish:` block (e.g. github) when a release channel exists.
