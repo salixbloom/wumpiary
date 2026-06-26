@@ -48,7 +48,13 @@ mac:
   # Signing/notarization credentials are supplied via CI env vars at release
   # time (CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID …); unset = unsigned local build.
 
-# ---- Auto-update ----------------------------------------------------------
-# No publish provider is configured yet, so packaged builds ship without an
-# update feed (updater stays dormant — see src/main/updater.ts). Add a
-# `publish:` block (e.g. github) when a release channel exists.
+# ---- Auto-update / publishing --------------------------------------------
+# Publishing target = GitHub Releases. `--publish always` (used by the release
+# workflow) uploads artifacts here; `--publish never` (the local package:*
+# scripts) just writes to dist/. This also generates the latest*.yml metadata
+# that electron-updater reads, so the dormant updater (src/main/updater.ts)
+# activates automatically for packaged builds once a release is published.
+publish:
+  provider: github
+  owner: salixbloom
+  repo: wumpiary
