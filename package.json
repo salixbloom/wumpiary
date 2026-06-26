@@ -4,6 +4,10 @@
   "private": true,
   "description": "Multi-account Discord wrapper — keep every account connected, notified, and isolated.",
   "author": "Willow Bloom <salixbloom@users.noreply.github.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/salixbloom/wumpiary.git"
+  },
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -16,7 +20,8 @@
     "package:linux": "npm run build && electron-builder --linux --publish never",
     "package:win": "npm run build && electron-builder --win --publish never",
     "package:mac": "npm run build && electron-builder --mac --publish never",
-    "package:all": "npm run build && electron-builder -mwl --publish never"
+    "package:all": "npm run build && electron-builder -mwl --publish never",
+    "release": "npm run build && electron-builder --publish always"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
