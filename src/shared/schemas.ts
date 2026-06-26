@@ -93,6 +93,7 @@ export const RendererSchemas = {
   patchUi: z.tuple([UiPatch]),
   patchGlobal: z.tuple([GlobalPatch]),
   setOverlay: z.tuple([z.boolean()]),
+  setWindowBackground: z.tuple([CssColor]),
   windowMinimize: z.tuple([]),
   windowToggleMaximize: z.tuple([]),
   windowClose: z.tuple([]),

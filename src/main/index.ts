@@ -244,7 +244,6 @@ class AppController {
     this.showWindow();
     if (this.locked) return;
     this.accounts.setActive(id);
-    this.applyShellTheme();
     this.scheduleState();
   }
 
@@ -285,14 +284,8 @@ class AppController {
     const { accountId: _accountId, ...shellTheme } = theme;
     this.shellThemes[accountId] = shellTheme;
     if (this.accounts?.activeId === accountId) {
-      this.applyShellTheme();
       this.scheduleState();
     }
-  }
-
-  private applyShellTheme() {
-    const theme = this.accounts?.activeId ? this.shellThemes[this.accounts.activeId] : null;
-    this.win.setBackgroundColor(theme?.appFrameBackground || '#1e1f22');
   }
 
   // ---- IPC ---------------------------------------------------------------
@@ -387,6 +380,10 @@ class AppController {
     invoke(IPC.patchUi, RendererSchemas.patchUi, (_e, patch: Partial<UiConfig>) => guard(() => this.patchUi(patch)));
     invoke(IPC.patchGlobal, RendererSchemas.patchGlobal, (_e, patch: Partial<GlobalConfig>) => guard(() => this.patchGlobal(patch)));
     invoke(IPC.setOverlay, RendererSchemas.setOverlay, (_e, on) => guard(() => this.accounts.setOverlay(on)));
+    invoke(IPC.setWindowBackground, RendererSchemas.setWindowBackground, (_e, color) => {
+      this.win.setBackgroundColor(color || '#1e1f22');
+      return { ok: true };
+    });
     invoke(IPC.windowMinimize, RendererSchemas.windowMinimize, () => { this.win.minimize(); return { ok: true }; });
     invoke(IPC.windowToggleMaximize, RendererSchemas.windowToggleMaximize, () => {
       if (this.win.isMaximized()) this.win.unmaximize();

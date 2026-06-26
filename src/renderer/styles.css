@@ -53,36 +53,51 @@ input, select { font: inherit; }
 
 /* ---- layout ---- */
 .app-frame { height: 100%; display: flex; flex-direction: column; background: var(--app-frame-background); position: relative; overflow: hidden; }
-.theme-revealing .titlebar,
-.theme-revealing .sidebar,
-.theme-revealing .stage {
+.theme-fading .titlebar,
+.theme-fading .sidebar,
+.theme-fading .stage {
   overflow: hidden;
   isolation: isolate;
 }
-.theme-revealing .titlebar::before,
-.theme-revealing .sidebar::before,
-.theme-revealing .stage::before {
+.theme-fading .titlebar::before,
+.theme-fading .sidebar::before,
+.theme-fading .stage::before {
   content: '';
-  position: absolute; left: 0; bottom: 0; z-index: 0; pointer-events: none;
-  width: 260vmax; height: 260vmax; border-radius: 50%;
-  background: radial-gradient(circle, var(--wipe-color) 0%, var(--wipe-color) 24%, color-mix(in srgb, var(--wipe-color) 62%, transparent) 44%, color-mix(in srgb, var(--wipe-color) 24%, transparent) 64%, rgba(0,0,0,0) 86%);
-  transform: translate(-50%, 50%) scale(.01);
-  transform-origin: center;
-  will-change: transform;
-  animation: theme-wipe 900ms cubic-bezier(.16, 1, .3, 1) forwards;
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  will-change: opacity;
 }
-.theme-revealing .titlebar-brand,
-.theme-revealing .window-controls,
-.theme-revealing .sidebar-head,
-.theme-revealing .perches,
-.theme-revealing .sidebar-foot,
-.theme-revealing .stage > * {
+.theme-fading-0 .titlebar::before,
+.theme-fading-0 .sidebar::before,
+.theme-fading-0 .stage::before {
+  animation: theme-old-background-fade-a 260ms ease-out forwards;
+}
+.theme-fading-1 .titlebar::before,
+.theme-fading-1 .sidebar::before,
+.theme-fading-1 .stage::before {
+  animation: theme-old-background-fade-b 260ms ease-out forwards;
+}
+.theme-fading .titlebar::before {
+  background: var(--old-app-frame-background);
+  box-shadow: inset 0 -1px var(--old-shell-border);
+}
+.theme-fading .sidebar::before { background: var(--old-shell-bg-2); }
+.theme-fading .stage::before { background: var(--old-shell-bg-3); }
+.theme-fading .titlebar-brand,
+.theme-fading .window-controls,
+.theme-fading .sidebar-head,
+.theme-fading .perches,
+.theme-fading .sidebar-foot,
+.theme-fading .stage > * {
   position: relative;
   z-index: 1;
 }
-@keyframes theme-wipe {
-  from { transform: translate(-50%, 50%) scale(.01); }
-  to { transform: translate(-50%, 50%) scale(1); }
+@keyframes theme-old-background-fade-a {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes theme-old-background-fade-b {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 .titlebar {
   position: relative; z-index: 1;

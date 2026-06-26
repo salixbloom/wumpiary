@@ -21,6 +21,7 @@ export const IPC = {
   patchUi: 'settings:patchUi',
   patchGlobal: 'settings:patchGlobal',
   setOverlay: 'ui:setOverlay', // hide account views while a full-window modal is open
+  setWindowBackground: 'ui:setWindowBackground',
   windowMinimize: 'window:minimize',
   windowToggleMaximize: 'window:toggleMaximize',
   windowClose: 'window:close',

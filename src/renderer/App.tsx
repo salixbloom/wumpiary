@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, useStore } from './store';
 import { Sidebar } from './Sidebar';
 import { LockScreen } from './LockScreen';
@@ -9,9 +9,9 @@ export function App() {
   const [tab, setTab] = useState<SettingsTab | null>(null);
   const [settingsAccount, setSettingsAccount] = useState<string | null>(null);
   const [autofillId, setAutofillId] = useState<string | null>(null);
-  const [themeWipe, setThemeWipe] = useState<{ id: number; color: string } | null>(null);
+  const [themeFade, setThemeFade] = useState<{ id: number; vars: ShellVars } | null>(null);
   const lastShellVars = useRef<ShellVars | null>(null);
-  const wipeTimer = useRef<number | null>(null);
+  const themeFadeTimer = useRef<number | null>(null);
 
   // Main asks us to open the autofill PIN prompt when a signed-out account that
   // has a saved login is activated (e.g. via the "signed out" notification).
@@ -25,26 +25,29 @@ export function App() {
     document.documentElement.style.setProperty('--accent', state.config.ui.accent);
   }, [state?.config.ui.theme, state?.config.ui.accent]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     const next = resolveShellVars(state?.shellTheme);
     const prev = lastShellVars.current;
     const commit = () => {
       applyShellVars(root, next);
+      api.setWindowBackground(next.appFrameBackground);
       lastShellVars.current = next;
-      setThemeWipe(null);
     };
 
-    if (wipeTimer.current) window.clearTimeout(wipeTimer.current);
-    if (!prev || prev.appFrameBackground === next.appFrameBackground) {
+    if (themeFadeTimer.current) window.clearTimeout(themeFadeTimer.current);
+    if (!prev) {
       commit();
+      setThemeFade(null);
       return;
     }
+    if (shellVarsEqual(prev, next)) return;
 
-    setThemeWipe({ id: Date.now(), color: next.appFrameBackground });
-    wipeTimer.current = window.setTimeout(commit, THEME_WIPE_MS);
+    setThemeFade({ id: Date.now(), vars: prev });
+    commit();
+    themeFadeTimer.current = window.setTimeout(() => setThemeFade(null), THEME_FADE_MS);
     return () => {
-      if (wipeTimer.current) window.clearTimeout(wipeTimer.current);
+      if (themeFadeTimer.current) window.clearTimeout(themeFadeTimer.current);
     };
   }, [state?.shellTheme]);
 
@@ -53,8 +56,8 @@ export function App() {
     api.setOverlay(tab !== null);
   }, [tab]);
 
-  if (!state) return <AppFrame themeWipe={themeWipe}><div className="loading">Loading...</div></AppFrame>;
-  if (state.locked) return <AppFrame themeWipe={themeWipe}><LockScreen hasVault={state.hasVault} encryptionAvailable={state.encryptionAvailable} /></AppFrame>;
+  if (!state) return <AppFrame themeFade={themeFade}><div className="loading">Loading...</div></AppFrame>;
+  if (state.locked) return <AppFrame themeFade={themeFade}><LockScreen hasVault={state.hasVault} encryptionAvailable={state.encryptionAvailable} /></AppFrame>;
 
   const side = state.config.ui.sidebarSide;
   const sidebar = (
@@ -67,7 +70,7 @@ export function App() {
   );
 
   return (
-    <AppFrame themeWipe={themeWipe}>
+    <AppFrame themeFade={themeFade}>
       <div className={`app side-${side}`}>
         {side === 'left' && sidebar}
         <div className="stage">{!state.activeId && <EmptyState hasAccounts={state.config.accountsOrder.length > 0} />}</div>
@@ -115,7 +118,7 @@ const SHELL_FALLBACK: ShellVars = {
   textDim: '#949ba4',
   border: '#1f2023',
 };
-const THEME_WIPE_MS = 900;
+const THEME_FADE_MS = 260;
 
 function resolveShellVars(theme: {
   appFrameBackground?: string;
@@ -151,10 +154,29 @@ function applyShellVars(root: HTMLElement, vars: ShellVars) {
   root.style.setProperty('--shell-border', vars.border);
 }
 
-function AppFrame({ children, themeWipe }: { children: React.ReactNode; themeWipe: { id: number; color: string } | null }) {
-  const frameStyle = themeWipe ? ({ '--wipe-color': themeWipe.color } as React.CSSProperties) : undefined;
+function shellVarsEqual(a: ShellVars, b: ShellVars) {
   return (
-    <div className={`app-frame ${themeWipe ? 'theme-revealing' : ''}`} style={frameStyle}>
+    a.appFrameBackground === b.appFrameBackground &&
+    a.bg === b.bg &&
+    a.bg2 === b.bg2 &&
+    a.bg3 === b.bg3 &&
+    a.bgHover === b.bgHover &&
+    a.text === b.text &&
+    a.textDim === b.textDim &&
+    a.border === b.border
+  );
+}
+
+function AppFrame({ children, themeFade }: { children: React.ReactNode; themeFade: { id: number; vars: ShellVars } | null }) {
+  const frameStyle = themeFade ? ({
+    '--old-app-frame-background': themeFade.vars.appFrameBackground,
+    '--old-shell-bg-2': themeFade.vars.bg2,
+    '--old-shell-bg-3': themeFade.vars.bg3,
+    '--old-shell-border': themeFade.vars.border,
+  } as React.CSSProperties) : undefined;
+  const fadeClass = themeFade ? `theme-fading theme-fading-${themeFade.id % 2}` : '';
+  return (
+    <div className={`app-frame ${fadeClass}`} style={frameStyle}>
       <div className="titlebar">
         <div className="titlebar-brand">wumpiary</div>
         <div className="window-controls">
