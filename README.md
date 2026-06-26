@@ -2,7 +2,7 @@
 
 A home for many Wumpuses — a cross-platform desktop app that runs **multiple Discord accounts at once**, each in its own isolated, persistent session, so notifications from every account arrive together in real time.
 
-It loads the genuine Discord web client and **observes only** — it never automates accounts or modifies Discord. See [PLAN.md](PLAN.md) for the full design and [SPIKE_FINDINGS.md](SPIKE_FINDINGS.md) for the resource/stability research behind it.
+It loads the Discord web client and is **observation only** — it never automates accounts or modifies Discord.
 
 ## Features
 
