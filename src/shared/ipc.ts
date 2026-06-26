@@ -23,6 +23,11 @@ export const IPC = {
   setOverlay: 'ui:setOverlay', // hide account views while a full-window modal is open
   clearActivity: 'activity:clear',
 
+  // renderer -> main (saved login / autofill)
+  saveLogin: 'login:save',
+  clearLogin: 'login:clear',
+  autofillLogin: 'login:autofill',
+
   // renderer -> main (plugins)
   setPluginEnabled: 'plugins:setEnabled',
   setPluginPermission: 'plugins:setPermission',
@@ -32,11 +37,13 @@ export const IPC = {
   // main -> renderer (events)
   stateChanged: 'app:stateChanged',
   playChime: 'app:playChime',
+  promptAutofill: 'app:promptAutofill', // ask the renderer to open the autofill PIN modal
 
-  // account-observer preload -> main
+  // account-observer preload <-> main
   obMetrics: 'observer:metrics',
   obNotification: 'observer:notification',
   obConnection: 'observer:connection',
+  obFill: 'observer:fill', // main -> view: fill the login form (observe-only exception)
 
   // main <-> sandboxed plugin host
   phMsg: 'pluginhost:msg', // main -> host (load/unload/event/accounts)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api, useStore } from './store';
 import { Sidebar } from './Sidebar';
 import { LockScreen } from './LockScreen';
@@ -8,6 +8,11 @@ export function App() {
   const state = useStore((s) => s.state);
   const [tab, setTab] = useState<SettingsTab | null>(null);
   const [settingsAccount, setSettingsAccount] = useState<string | null>(null);
+  const [autofillId, setAutofillId] = useState<string | null>(null);
+
+  // Main asks us to open the autofill PIN prompt when a signed-out account that
+  // has a saved login is activated (e.g. via the "signed out" notification).
+  useEffect(() => api.onPromptAutofill(({ accountId }) => setAutofillId(accountId)), []);
 
   useEffect(() => {
     if (!state) return;
@@ -31,6 +36,7 @@ export function App() {
       state={state}
       onOpenSettings={() => setTab('general')}
       onAccountSettings={(id) => { setSettingsAccount(id); setTab('account'); }}
+      onAutofill={(id) => setAutofillId(id)}
     />
   );
 
@@ -49,6 +55,46 @@ export function App() {
           onClose={() => setTab(null)}
         />
       )}
+      {autofillId && state.config.accounts[autofillId] && (
+        <AutofillModal
+          nickname={state.config.accounts[autofillId].nickname}
+          accountId={autofillId}
+          onClose={() => setAutofillId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AutofillModal({ nickname, accountId, onClose }: { nickname: string; accountId: string; onClose: () => void }) {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pin || busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await api.autofillLogin(accountId, pin);
+    setBusy(false);
+    setPin('');
+    if (r.ok) onClose();
+    else setError(r.error === 'wrong-pin' ? 'Incorrect PIN.' : 'No saved password for this account.');
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <form className="pin-modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h3>Sign in to {nickname}</h3>
+        <p className="note">Enter your PIN to autofill the login. You’ll still solve any captcha / 2FA and click Log In yourself.</p>
+        <input type="password" autoFocus inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
+        {error && <p className="pin-error">{error}</p>}
+        <div className="pin-actions">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="submit" className="primary" disabled={!pin || busy}>{busy ? 'Filling…' : 'Autofill'}</button>
+        </div>
+      </form>
     </div>
   );
 }

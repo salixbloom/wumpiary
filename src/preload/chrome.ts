@@ -32,6 +32,10 @@ const api = {
   setOverlay: (on: boolean) => ipcRenderer.invoke(IPC.setOverlay, on),
   clearActivity: () => ipcRenderer.invoke(IPC.clearActivity),
 
+  saveLogin: (id: string, email: string, password: string, pin: string): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.saveLogin, id, email, password, pin),
+  clearLogin: (id: string) => ipcRenderer.invoke(IPC.clearLogin, id),
+  autofillLogin: (id: string, pin: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IPC.autofillLogin, id, pin),
+
   setPluginEnabled: (id: string, on: boolean) => ipcRenderer.invoke(IPC.setPluginEnabled, id, on),
   setPluginPermission: (id: string, perm: PluginPermission, granted: boolean) => ipcRenderer.invoke(IPC.setPluginPermission, id, perm, granted),
   reloadPlugins: () => ipcRenderer.invoke(IPC.reloadPlugins),
@@ -46,6 +50,11 @@ const api = {
     const l = (_e: unknown, p: { accountId: string; chime: string }) => cb(p);
     ipcRenderer.on(IPC.playChime, l);
     return () => ipcRenderer.removeListener(IPC.playChime, l);
+  },
+  onPromptAutofill: (cb: (p: { accountId: string }) => void): (() => void) => {
+    const l = (_e: unknown, p: { accountId: string }) => cb(p);
+    ipcRenderer.on(IPC.promptAutofill, l);
+    return () => ipcRenderer.removeListener(IPC.promptAutofill, l);
   },
 };
 
