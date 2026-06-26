@@ -7,6 +7,13 @@ semantic versioning.
 ## [0.2.0] — unreleased
 
 ### Added
+- **Re-login detection & autofill** — when Discord signs an account out, wumpiary
+  surfaces it (a one-time "signed out" notification that focuses the account) and
+  can autofill the login. Opt-in credentials: the email is kept in the encrypted
+  vault and the password is additionally encrypted under a key derived from your
+  PIN, so autofilling always re-asks for the PIN; the plaintext is wiped from
+  memory right after use. Nothing is auto-submitted — you still solve any
+  captcha/2FA and click Log In yourself (stays observe-only, no automation).
 - **Plugin system** — sandboxed, permission-gated plugins (folder packages with
   `manifest.json`) that extend wumpiary's own shell: subscribe to notification
   and account events, post notifications, persist small state, and apply
