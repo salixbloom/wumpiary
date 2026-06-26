@@ -42,7 +42,7 @@ export function App() {
     }
 
     setThemeWipe({ id: Date.now(), color: next.appFrameBackground });
-    wipeTimer.current = window.setTimeout(commit, 520);
+    wipeTimer.current = window.setTimeout(commit, THEME_WIPE_MS);
     return () => {
       if (wipeTimer.current) window.clearTimeout(wipeTimer.current);
     };
@@ -115,6 +115,7 @@ const SHELL_FALLBACK: ShellVars = {
   textDim: '#949ba4',
   border: '#1f2023',
 };
+const THEME_WIPE_MS = 900;
 
 function resolveShellVars(theme: {
   appFrameBackground?: string;

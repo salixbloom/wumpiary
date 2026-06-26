@@ -54,14 +54,17 @@ input, select { font: inherit; }
 /* ---- layout ---- */
 .app-frame { height: 100%; display: flex; flex-direction: column; background: var(--app-frame-background); position: relative; overflow: hidden; }
 .theme-wipe {
-  position: fixed; inset: 0; z-index: 1000; pointer-events: none;
-  background: radial-gradient(circle at 0 100%, var(--wipe-color) 0%, var(--wipe-color) 62%, transparent 78%);
-  clip-path: circle(0 at 0 100%);
-  animation: theme-wipe 520ms cubic-bezier(.2, .8, .2, 1) forwards;
+  position: fixed; left: 0; bottom: 0; z-index: 1000; pointer-events: none;
+  width: 300vmax; height: 300vmax; border-radius: 50%;
+  background: radial-gradient(circle, var(--wipe-color) 0%, var(--wipe-color) 68%, rgba(0,0,0,0) 78%);
+  transform: translate(-50%, 50%) scale(.01);
+  transform-origin: center;
+  will-change: transform;
+  animation: theme-wipe 900ms cubic-bezier(.16, 1, .3, 1) forwards;
 }
 @keyframes theme-wipe {
-  from { clip-path: circle(0 at 0 100%); }
-  to { clip-path: circle(150vmax at 0 100%); }
+  from { transform: translate(-50%, 50%) scale(.01); }
+  to { transform: translate(-50%, 50%) scale(1); }
 }
 .titlebar {
   height: var(--titlebar-height); flex-shrink: 0;
