@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc';
 import type { AccountPatch, AppState, GlobalConfig, UiConfig } from '../shared/types';
+import type { PluginPermission } from '../shared/plugins';
 
 export interface UnlockResult {
   ok: boolean;
@@ -30,6 +31,11 @@ const api = {
   patchGlobal: (patch: Partial<GlobalConfig>) => ipcRenderer.invoke(IPC.patchGlobal, patch),
   setOverlay: (on: boolean) => ipcRenderer.invoke(IPC.setOverlay, on),
   clearActivity: () => ipcRenderer.invoke(IPC.clearActivity),
+
+  setPluginEnabled: (id: string, on: boolean) => ipcRenderer.invoke(IPC.setPluginEnabled, id, on),
+  setPluginPermission: (id: string, perm: PluginPermission, granted: boolean) => ipcRenderer.invoke(IPC.setPluginPermission, id, perm, granted),
+  reloadPlugins: () => ipcRenderer.invoke(IPC.reloadPlugins),
+  openPluginsFolder: () => ipcRenderer.invoke(IPC.openPluginsFolder),
 
   onState: (cb: (s: AppState) => void): (() => void) => {
     const l = (_e: unknown, s: AppState) => cb(s);

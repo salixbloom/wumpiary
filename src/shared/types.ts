@@ -1,5 +1,7 @@
 // Shared types used across main, preload, and renderer.
 
+import type { PluginInfo } from './plugins';
+
 export type NotificationFilter = 'all' | 'mentions' | 'dms' | 'mentions+dms' | 'none';
 export type CallPolicy = 'allow' | 'muted' | 'silent' | 'block';
 export type Theme = 'dark' | 'light' | 'system';
@@ -90,6 +92,7 @@ export interface AppState {
   activity: ActivityEntry[];
   totalMentions: number;
   encryptionAvailable: boolean;
+  plugins: PluginInfo[];
 }
 
 export type AccountPatch = Partial<

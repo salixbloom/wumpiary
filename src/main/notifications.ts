@@ -35,6 +35,9 @@ export class NotificationRouter {
     private onActivate: (accountId: string) => void,
     private playChime: (accountId: string, chime: string) => void,
     private addActivity: (entry: ActivityEntry) => void,
+    // Fired when a notification is actually surfaced (post-suppression), for
+    // plugins holding the `notifications` permission.
+    private onShown: (p: { accountId: string; nickname: string; title: string; body: string; kind: NotifKind }) => void = () => undefined,
   ) {}
 
   handle(p: ObserverNotification) {
@@ -73,6 +76,7 @@ export class NotificationRouter {
     });
     notif.on('click', () => this.onActivate(p.accountId));
     notif.show();
+    this.onShown({ accountId: p.accountId, nickname: acc.nickname, title: p.title, body: p.body, kind: p.kind });
 
     if (!silent) this.playChime(p.accountId, p.kind === 'call' ? acc.calls.ringtone : n.chime);
   }

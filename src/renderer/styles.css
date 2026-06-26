@@ -191,3 +191,18 @@ button.primary:hover { filter: brightness(1.08); }
 .act-body { color: var(--text-dim); grid-column: 3 / 5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act-time { color: var(--text-dim); font-size: 11px; }
 .about p { line-height: 1.6; color: var(--text-dim); }
+
+/* Plugins tab */
+.plugins { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.plugin { background: var(--bg-2); border-radius: 8px; padding: 12px 14px; }
+.plugin.has-error { outline: 1px solid var(--red); }
+.plugin-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.plugin-id { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.plugin-name { font-weight: 600; }
+.plugin-version { color: var(--text-dim); font-size: 12px; }
+.plugin-author { color: var(--text-dim); font-size: 12px; }
+.plugin-desc { color: var(--text-dim); margin: 6px 0 0; line-height: 1.5; }
+.plugin-error { color: var(--red); margin: 6px 0 0; font-size: 13px; }
+.plugin-perms { margin-top: 10px; border-top: 1px solid var(--bg-hover); padding-top: 8px; }
+.plugin-perms > small { color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+.perm-row { padding: 6px 0; }

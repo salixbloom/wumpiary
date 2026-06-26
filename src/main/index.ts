@@ -10,6 +10,7 @@ import { NotificationRouter, ObserverNotification } from './notifications';
 import { AppTray } from './tray';
 import { registerHotkeys, unregisterHotkeys } from './hotkeys';
 import { initUpdater } from './updater';
+import { PluginManager } from './plugins';
 import { IPC } from '../shared/ipc';
 import { AccountPatch, AccountRuntime, ActivityEntry, AppState, ConnectionState, GlobalConfig, UiConfig } from '../shared/types';
 
@@ -19,6 +20,7 @@ class AppController {
   private win!: BrowserWindow;
   private accounts!: AccountManager;
   private router!: NotificationRouter;
+  private plugins!: PluginManager;
   private tray?: AppTray;
 
   private locked = true;
@@ -33,11 +35,18 @@ class AppController {
     this.applyChromeCsp();
     this.createWindow();
     this.accounts = new AccountManager(this.win, path.join(__dirname, '../preload/account-observer.js'), this.cfg, (id, patch) => this.onRuntime(id, patch));
+    this.plugins = new PluginManager(
+      path.join(__dirname, '../preload/plugin-host.js'),
+      (css) => this.accounts.setPluginCss(css),
+      () => this.scheduleState(),
+    );
+    this.plugins.init();
     this.router = new NotificationRouter(
       this.cfg,
       (id) => this.activate(id),
       (id, chime) => this.win.webContents.send(IPC.playChime, { accountId: id, chime }),
       (entry) => { this.activity.unshift(entry); this.activity = this.activity.slice(0, 200); this.scheduleState(); },
+      (p) => this.plugins.emitNotification(p),
     );
     try {
       this.tray = new AppTray(this.cfg, {
@@ -146,7 +155,27 @@ class AppController {
       activity: this.activity.slice(0, 100),
       totalMentions,
       encryptionAvailable: this.vault.encryptionAvailable,
+      plugins: this.plugins?.getInfos() ?? [],
     };
+  }
+
+  /** Sanitized per-account snapshot for plugins holding the `accounts` perm. */
+  private pluginAccounts() {
+    const c = this.cfg.get();
+    return c.accountsOrder.map((id) => {
+      const a = c.accounts[id];
+      const r = this.runtime[id];
+      return {
+        id,
+        nickname: a?.nickname ?? '',
+        color: a?.color ?? '',
+        connection: r?.connection ?? 'offline',
+        unread: r?.unread ?? 0,
+        mentions: r?.mentions ?? 0,
+        hibernated: !!a?.hibernated,
+        signedIn: !!a?.signedIn,
+      };
+    });
   }
 
   private scheduleState() {
@@ -156,6 +185,7 @@ class AppController {
       const s = this.buildState();
       this.win.webContents.send(IPC.stateChanged, s);
       this.tray?.refresh(s.totalMentions);
+      if (!this.locked) this.plugins.emitAccounts(this.pluginAccounts());
     }, 60);
   }
 
@@ -164,6 +194,7 @@ class AppController {
     this.locked = false;
     this.accounts.init();
     this.accounts.setOverlay(false);
+    this.plugins.startHost(); // load plugins only after the user has unlocked
     this.applyGlobal();
     this.scheduleState();
   }
@@ -309,6 +340,15 @@ class AppController {
     invoke(IPC.setOverlay, RendererSchemas.setOverlay, (_e, on) => guard(() => this.accounts.setOverlay(on)));
     invoke(IPC.clearActivity, RendererSchemas.clearActivity, () => guard(() => { this.activity = []; this.scheduleState(); }));
 
+    // plugins (renderer -> main)
+    invoke(IPC.setPluginEnabled, RendererSchemas.setPluginEnabled, (_e, id, on) => guard(() => this.plugins.setEnabled(id, on)));
+    invoke(IPC.setPluginPermission, RendererSchemas.setPluginPermission, (_e, id, perm, granted) => guard(() => this.plugins.setPermission(id, perm, granted)));
+    invoke(IPC.reloadPlugins, RendererSchemas.reloadPlugins, () => guard(() => this.plugins.reload()));
+    invoke(IPC.openPluginsFolder, RendererSchemas.openPluginsFolder, () => guard(() => this.plugins.openFolder()));
+
+    // sandboxed plugin host -> main (re-validated inside the manager)
+    ipcMain.on(IPC.phCall, (e, msg) => { if (this.plugins.isHostSender(e.sender)) this.plugins.handleHostCall(msg); });
+
     // observe-only events from account views (least-trusted surface)
     on(IPC.obMetrics, ObserverSchemas.obMetrics, (_e, p) => {
       this.onRuntime(p.accountId, { unread: p.unread, mentions: p.mentions });
@@ -350,6 +390,7 @@ class AppController {
     unregisterHotkeys();
     this.cfg.flush();
     this.accounts?.destroyAll();
+    this.plugins?.destroy();
     this.tray?.destroy();
   }
 }

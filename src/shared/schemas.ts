@@ -93,7 +93,25 @@ export const RendererSchemas = {
   patchGlobal: z.tuple([GlobalPatch]),
   setOverlay: z.tuple([z.boolean()]),
   clearActivity: z.tuple([]),
+  setPluginEnabled: z.tuple([z.string().max(64), z.boolean()]),
+  setPluginPermission: z.tuple([z.string().max(64), z.enum(['accounts', 'notifications', 'discord-css']), z.boolean()]),
+  reloadPlugins: z.tuple([]),
+  openPluginsFolder: z.tuple([]),
 } as const;
+
+// Plugin manifest (manifest.json) — validated on disk, not over IPC, but kept
+// here alongside the rest of the trust boundary.
+export const PluginManifestSchema = z
+  .object({
+    id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'id must be kebab-case').max(64),
+    name: z.string().min(1).max(120),
+    version: z.string().min(1).max(40),
+    description: z.string().max(500).optional(),
+    author: z.string().max(120).optional(),
+    entry: z.string().min(1).max(200),
+    permissions: z.array(z.enum(['accounts', 'notifications', 'discord-css'])).max(8).default([]),
+  })
+  .strip();
 
 // account-observer preload -> main (send). These come from the Discord page's
 // renderer, so they are the least-trusted surface and must be clamped.

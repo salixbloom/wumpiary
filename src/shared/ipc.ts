@@ -23,6 +23,12 @@ export const IPC = {
   setOverlay: 'ui:setOverlay', // hide account views while a full-window modal is open
   clearActivity: 'activity:clear',
 
+  // renderer -> main (plugins)
+  setPluginEnabled: 'plugins:setEnabled',
+  setPluginPermission: 'plugins:setPermission',
+  reloadPlugins: 'plugins:reload',
+  openPluginsFolder: 'plugins:openFolder',
+
   // main -> renderer (events)
   stateChanged: 'app:stateChanged',
   playChime: 'app:playChime',
@@ -31,6 +37,10 @@ export const IPC = {
   obMetrics: 'observer:metrics',
   obNotification: 'observer:notification',
   obConnection: 'observer:connection',
+
+  // main <-> sandboxed plugin host
+  phMsg: 'pluginhost:msg', // main -> host (load/unload/event/accounts)
+  phCall: 'pluginhost:call', // host -> main (plugin api calls, ready, errors)
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
