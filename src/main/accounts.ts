@@ -5,6 +5,7 @@ import { IPC } from '../shared/ipc';
 import { AccountRuntime, ConnectionState, defaultAccountColors, newAccountConfig } from '../shared/types';
 
 const DISCORD_URL = 'https://discord.com/app';
+const TITLE_BAR_HEIGHT = 34;
 
 /**
  * Owns one isolated WebContentsView per account and applies the resource &
@@ -101,7 +102,7 @@ export class AccountManager {
     const sb = ui.sidebarCollapsed ? 64 : ui.sidebarWidth;
     const x = ui.sidebarSide === 'left' ? sb : 0;
     const width = Math.max(0, w - sb);
-    for (const view of this.views.values()) view.setBounds({ x, y: 0, width, height: h });
+    for (const view of this.views.values()) view.setBounds({ x, y: TITLE_BAR_HEIGHT, width, height: Math.max(0, h - TITLE_BAR_HEIGHT) });
     this.applyVisibility();
   }
 

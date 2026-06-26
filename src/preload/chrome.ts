@@ -30,6 +30,9 @@ const api = {
   patchUi: (patch: Partial<UiConfig>) => ipcRenderer.invoke(IPC.patchUi, patch),
   patchGlobal: (patch: Partial<GlobalConfig>) => ipcRenderer.invoke(IPC.patchGlobal, patch),
   setOverlay: (on: boolean) => ipcRenderer.invoke(IPC.setOverlay, on),
+  minimizeWindow: () => ipcRenderer.invoke(IPC.windowMinimize),
+  toggleMaximizeWindow: () => ipcRenderer.invoke(IPC.windowToggleMaximize),
+  closeWindow: () => ipcRenderer.invoke(IPC.windowClose),
   clearActivity: () => ipcRenderer.invoke(IPC.clearActivity),
 
   saveLogin: (id: string, email: string, password: string, pin: string): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.saveLogin, id, email, password, pin),

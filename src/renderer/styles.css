@@ -1,5 +1,14 @@
 :root {
   --accent: #5865f2;
+  --titlebar-height: 34px;
+  --app-frame-background: #1e1f22;
+  --shell-bg: #1e1f22;
+  --shell-bg-2: #2b2d31;
+  --shell-bg-3: #313338;
+  --shell-bg-hover: #35373c;
+  --shell-text: #dbdee1;
+  --shell-text-dim: #949ba4;
+  --shell-border: #1f2023;
 }
 html[data-theme='dark'] {
   --bg: #1e1f22;
@@ -32,8 +41,8 @@ html[data-theme='light'] {
 html, body, #root { height: 100%; margin: 0; }
 body {
   font-family: 'gg sans', 'Segoe UI', system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--app-frame-background);
+  color: var(--shell-text, var(--text));
   overflow: hidden;
   user-select: none;
 }
@@ -43,8 +52,26 @@ input, select { font: inherit; }
 .loading { display: grid; place-items: center; height: 100%; color: var(--text-dim); }
 
 /* ---- layout ---- */
+.app-frame { height: 100%; display: flex; flex-direction: column; background: var(--app-frame-background); }
+.titlebar {
+  height: var(--titlebar-height); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--app-frame-background); color: var(--shell-text, var(--text));
+  border-bottom: 1px solid var(--shell-border, var(--border));
+  -webkit-app-region: drag;
+}
+.titlebar-brand { padding: 0 12px; font-size: 12px; font-weight: 700; color: var(--shell-text-dim, var(--text-dim)); }
+.window-controls { height: 100%; display: flex; -webkit-app-region: no-drag; }
+.window-controls button {
+  width: 46px; height: 100%; display: grid; place-items: center;
+  background: transparent; border: none; border-radius: 0; color: var(--shell-text, var(--text));
+  font-size: 13px; line-height: 1;
+}
+.window-controls button:hover { background: var(--shell-bg-hover, var(--bg-hover)); }
+.window-controls button.close:hover { background: var(--red); color: #fff; }
+.app-body { flex: 1; min-height: 0; position: relative; }
 .app { display: flex; height: 100%; }
-.app .stage { flex: 1; background: var(--bg-3); position: relative; min-width: 0; }
+.app .stage { flex: 1; background: var(--shell-bg-3, var(--bg-3)); position: relative; min-width: 0; }
 
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 32px; color: var(--text-dim); }
 .empty h1 { color: var(--text); margin: 0; }
@@ -58,15 +85,16 @@ input, select { font: inherit; }
 /* ---- sidebar ---- */
 .sidebar {
   display: flex; flex-direction: column;
-  background: var(--bg-2);
-  border-left: 1px solid var(--border);
+  background: var(--shell-bg-2, var(--bg-2));
+  color: var(--shell-text, var(--text));
+  border-left: 1px solid var(--shell-border, var(--border));
   height: 100%;
   flex-shrink: 0;
   transition: width 0.12s ease;
 }
-.side-left .sidebar { border-left: none; border-right: 1px solid var(--border); }
+.side-left .sidebar { border-left: none; border-right: 1px solid var(--shell-border, var(--border)); }
 
-.sidebar-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.sidebar-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--shell-border, var(--border)); }
 .brand { font-weight: 700; letter-spacing: 0.3px; }
 .brand-badge { margin-left: auto; background: var(--red); color: #fff; border-radius: 10px; padding: 0 7px; font-size: 12px; font-weight: 700; }
 
@@ -77,8 +105,8 @@ input, select { font: inherit; }
   padding: 6px; border-radius: 8px; border: none; background: transparent;
   text-align: left; width: 100%; position: relative;
 }
-.perch:hover { background: var(--bg-hover); }
-.perch.active { background: var(--bg-hover); }
+.perch:hover { background: var(--shell-bg-hover, var(--bg-hover)); }
+.perch.active { background: var(--shell-bg-hover, var(--bg-hover)); }
 .perch.active::before {
   content: ''; position: absolute; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--accent);
 }
@@ -97,7 +125,7 @@ input, select { font: inherit; }
 
 .dot {
   position: absolute; right: -2px; bottom: -2px; width: 13px; height: 13px;
-  border-radius: 50%; border: 3px solid var(--bg-2);
+  border-radius: 50%; border: 3px solid var(--shell-bg-2, var(--bg-2));
 }
 .dot.connected { background: var(--green); }
 .dot.reconnecting { background: var(--amber); }
@@ -109,7 +137,7 @@ input, select { font: inherit; }
 
 .perch-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .perch-label { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.perch-sub { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perch-sub { font-size: 11px; color: var(--shell-text-dim, var(--text-dim)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .perch-counts { display: flex; gap: 4px; }
 
 .pill { border-radius: 10px; padding: 0 7px; font-size: 12px; font-weight: 700; color: #fff; }
@@ -117,9 +145,9 @@ input, select { font: inherit; }
 .pill.unread { background: var(--grey); }
 .pill.mini { position: absolute; right: -4px; top: -4px; padding: 0 5px; font-size: 10px; }
 
-.sidebar-foot { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
+.sidebar-foot { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--shell-border, var(--border)); }
 .icon-btn { background: transparent; border: none; padding: 6px 9px; border-radius: 8px; font-size: 15px; }
-.icon-btn:hover { background: var(--bg-hover); }
+.icon-btn:hover { background: var(--shell-bg-hover, var(--bg-hover)); }
 .icon-btn.on { background: var(--accent); color: #fff; }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
 
@@ -158,7 +186,7 @@ button.primary { background: var(--accent); color: #fff; border: none; border-ra
 button.primary:hover { filter: brightness(1.08); }
 
 /* ---- settings modal ---- */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: grid; place-items: center; z-index: 100; }
+.modal-backdrop { position: fixed; left: 0; right: 0; top: var(--titlebar-height); bottom: 0; background: rgba(0,0,0,0.5); display: grid; place-items: center; z-index: 100; }
 .modal { width: min(860px, 92vw); height: min(640px, 90vh); background: var(--bg-3); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); }
 .modal-nav { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-2); }
 .modal-title { font-weight: 700; margin-right: 8px; }

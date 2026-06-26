@@ -157,6 +157,19 @@ function ContextMenu({
   onAutofill: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x, y });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const margin = 8;
+    const rect = el.getBoundingClientRect();
+    setPos({
+      x: Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin)),
+      y: Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin)),
+    });
+  }, [x, y, signedOut, hasSavedPassword, account.notifications.muted, account.hibernated]);
+
   useEffect(() => {
     const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
     document.addEventListener('mousedown', h);
@@ -176,7 +189,7 @@ function ContextMenu({
   };
 
   return (
-    <div className="context-menu" ref={ref} style={{ left: x, top: y }}>
+    <div className="context-menu" ref={ref} style={{ left: pos.x, top: pos.y }}>
       <div className="cm-title">{account.nickname}</div>
       {signedOut && hasSavedPassword && (
         <>

@@ -21,6 +21,9 @@ export const IPC = {
   patchUi: 'settings:patchUi',
   patchGlobal: 'settings:patchGlobal',
   setOverlay: 'ui:setOverlay', // hide account views while a full-window modal is open
+  windowMinimize: 'window:minimize',
+  windowToggleMaximize: 'window:toggleMaximize',
+  windowClose: 'window:close',
   clearActivity: 'activity:clear',
 
   // renderer -> main (saved login / autofill)
@@ -41,6 +44,7 @@ export const IPC = {
 
   // account-observer preload <-> main
   obMetrics: 'observer:metrics',
+  obTheme: 'observer:theme',
   obNotification: 'observer:notification',
   obConnection: 'observer:connection',
   obFill: 'observer:fill', // main -> view: fill the login form (observe-only exception)

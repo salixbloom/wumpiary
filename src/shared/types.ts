@@ -6,6 +6,18 @@ export type NotificationFilter = 'all' | 'mentions' | 'dms' | 'mentions+dms' | '
 export type CallPolicy = 'allow' | 'muted' | 'silent' | 'block';
 export type Theme = 'dark' | 'light' | 'system';
 
+export interface ShellTheme {
+  name: string | null;
+  appFrameBackground: string;
+  bg: string;
+  bg2: string;
+  bg3: string;
+  bgHover: string;
+  text: string;
+  textDim: string;
+  border: string;
+}
+
 /** Connection/availability state shown as the per-account status dot. */
 export type ConnectionState =
   | 'connected'
@@ -95,6 +107,8 @@ export interface AppState {
   plugins: PluginInfo[];
   /** Per-account saved-login presence, for the autofill UI. */
   savedLogins: Record<string, { email: boolean; password: boolean }>;
+  /** Best-effort Discord theme tokens observed from the active account view. */
+  shellTheme: ShellTheme | null;
 }
 
 export type AccountPatch = Partial<

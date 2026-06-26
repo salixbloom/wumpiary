@@ -4,6 +4,7 @@ import { ipcRenderer, webFrame } from 'electron';
 // bundles to a single self-contained file with no sibling-chunk requires.
 const IPC = {
   obMetrics: 'observer:metrics',
+  obTheme: 'observer:theme',
   obNotification: 'observer:notification',
   obConnection: 'observer:connection',
   obFill: 'observer:fill',
@@ -59,13 +60,39 @@ const INJECT = `(() => {
     else state = 'connected';
     post({ __wump: 'conn', state: state });
   }
+  function cssVar(style, names) {
+    for (const name of names) {
+      const v = style.getPropertyValue(name).trim();
+      if (v) return v;
+    }
+    return '';
+  }
+  function theme() {
+    const root = document.documentElement;
+    const style = getComputedStyle(root);
+    const name = Array.from(root.classList).find((c) => c.indexOf('theme-') === 0) || null;
+    post({
+      __wump: 'theme',
+      name: name,
+      appFrameBackground: cssVar(style, ['--app-frame-background']),
+      bg: cssVar(style, ['--background-base-lowest', '--background-primary', '--bg-base-primary']),
+      bg2: cssVar(style, ['--background-base-lower', '--background-secondary', '--bg-base-secondary']),
+      bg3: cssVar(style, ['--background-base-low', '--background-tertiary', '--bg-base-tertiary']),
+      bgHover: cssVar(style, ['--background-modifier-hover', '--bg-mod-faint']),
+      text: cssVar(style, ['--text-primary', '--header-primary']),
+      textDim: cssVar(style, ['--text-muted', '--text-secondary', '--header-secondary']),
+      border: cssVar(style, ['--border-subtle', '--background-modifier-accent'])
+    });
+  }
 
   const start = () => {
-    metrics(); conn();
+    metrics(); conn(); theme();
     const titleEl = document.querySelector('title');
     if (titleEl) new MutationObserver(metrics).observe(titleEl, { childList: true, characterData: true, subtree: true });
+    new MutationObserver(theme).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
     setInterval(metrics, 5000);
     setInterval(conn, 5000);
+    setInterval(theme, 5000);
     window.addEventListener('online', conn);
     window.addEventListener('offline', conn);
   };
@@ -116,6 +143,19 @@ window.addEventListener('message', (e: MessageEvent) => {
     ipcRenderer.send(IPC.obNotification, { accountId, title: d.title, body: d.body, kind: d.kind });
   } else if (d.__wump === 'metrics') {
     ipcRenderer.send(IPC.obMetrics, { accountId, unread: d.unread, mentions: d.mentions });
+  } else if (d.__wump === 'theme') {
+    ipcRenderer.send(IPC.obTheme, {
+      accountId,
+      name: d.name,
+      appFrameBackground: d.appFrameBackground,
+      bg: d.bg,
+      bg2: d.bg2,
+      bg3: d.bg3,
+      bgHover: d.bgHover,
+      text: d.text,
+      textDim: d.textDim,
+      border: d.border,
+    });
   } else if (d.__wump === 'conn') {
     ipcRenderer.send(IPC.obConnection, { accountId, state: d.state });
   }

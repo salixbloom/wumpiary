@@ -19,6 +19,7 @@ const ConnectionState = z.enum([
   'connected', 'reconnecting', 'offline', 'hibernated', 'signed-out', 'loading',
 ]);
 const NotifKind = z.enum(['message', 'mention', 'dm', 'call']);
+const CssColor = z.string().max(128).catch('');
 
 // ---- composite payloads --------------------------------------------------
 const AccountNotifPatch = z
@@ -92,6 +93,9 @@ export const RendererSchemas = {
   patchUi: z.tuple([UiPatch]),
   patchGlobal: z.tuple([GlobalPatch]),
   setOverlay: z.tuple([z.boolean()]),
+  windowMinimize: z.tuple([]),
+  windowToggleMaximize: z.tuple([]),
+  windowClose: z.tuple([]),
   clearActivity: z.tuple([]),
   saveLogin: z.tuple([AccountId, z.string().max(320), z.string().max(512), z.string().min(1).max(256)]), // accountId, email, password, pin
   clearLogin: z.tuple([AccountId]),
@@ -122,6 +126,20 @@ const Counter = z.number().int().min(0).max(1_000_000).catch(0);
 export const ObserverSchemas = {
   obMetrics: z.tuple([
     z.object({ accountId: AccountId, unread: Counter, mentions: Counter }).strip(),
+  ]),
+  obTheme: z.tuple([
+    z.object({
+      accountId: AccountId,
+      name: z.string().max(80).nullable().catch(null),
+      appFrameBackground: CssColor,
+      bg: CssColor,
+      bg2: CssColor,
+      bg3: CssColor,
+      bgHover: CssColor,
+      text: CssColor,
+      textDim: CssColor,
+      border: CssColor,
+    }).strip(),
   ]),
   obConnection: z.tuple([
     z.object({ accountId: AccountId, state: ConnectionState }).strip(),

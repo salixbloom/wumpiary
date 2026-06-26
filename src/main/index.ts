@@ -12,7 +12,7 @@ import { registerHotkeys, unregisterHotkeys } from './hotkeys';
 import { initUpdater } from './updater';
 import { PluginManager } from './plugins';
 import { IPC } from '../shared/ipc';
-import { AccountPatch, AccountRuntime, ActivityEntry, AppState, ConnectionState, GlobalConfig, UiConfig } from '../shared/types';
+import { AccountPatch, AccountRuntime, ActivityEntry, AppState, ConnectionState, GlobalConfig, ShellTheme, UiConfig } from '../shared/types';
 
 class AppController {
   private cfg = new ConfigStore();
@@ -25,6 +25,7 @@ class AppController {
 
   private locked = true;
   private runtime: Record<string, AccountRuntime> = {};
+  private shellThemes: Record<string, ShellTheme> = {};
   private activity: ActivityEntry[] = [];
   private failed = 0;
   private lockoutUntil = 0;
@@ -96,6 +97,8 @@ class AppController {
       minWidth: 860,
       minHeight: 560,
       show: false,
+      autoHideMenuBar: true,
+      frame: false,
       backgroundColor: '#1e1f22',
       title: 'wumpiary',
       webPreferences: {
@@ -104,6 +107,7 @@ class AppController {
         sandbox: true,
       },
     });
+    this.win.setMenuBarVisibility(false);
 
     const devUrl = process.env['ELECTRON_RENDERER_URL'];
     if (devUrl) this.win.loadURL(devUrl).catch((e) => console.error('[main] loadURL failed', e));
@@ -183,6 +187,7 @@ class AppController {
       encryptionAvailable: this.vault.encryptionAvailable,
       plugins: this.plugins?.getInfos() ?? [],
       savedLogins: this.vault.unlocked ? this.vault.listCredentials() : {},
+      shellTheme: this.accounts?.activeId ? this.shellThemes[this.accounts.activeId] ?? null : null,
     };
   }
 
@@ -239,6 +244,7 @@ class AppController {
     this.showWindow();
     if (this.locked) return;
     this.accounts.setActive(id);
+    this.applyShellTheme();
     this.scheduleState();
   }
 
@@ -271,6 +277,22 @@ class AppController {
     this.cfg.update((c) => Object.assign(c.global, patch));
     this.applyGlobal();
     this.scheduleState();
+  }
+
+  private onTheme(theme: ShellTheme & { accountId?: string }) {
+    const accountId = theme.accountId;
+    if (!accountId) return;
+    const { accountId: _accountId, ...shellTheme } = theme;
+    this.shellThemes[accountId] = shellTheme;
+    if (this.accounts?.activeId === accountId) {
+      this.applyShellTheme();
+      this.scheduleState();
+    }
+  }
+
+  private applyShellTheme() {
+    const theme = this.accounts?.activeId ? this.shellThemes[this.accounts.activeId] : null;
+    this.win.setBackgroundColor(theme?.appFrameBackground || '#1e1f22');
   }
 
   // ---- IPC ---------------------------------------------------------------
@@ -365,6 +387,13 @@ class AppController {
     invoke(IPC.patchUi, RendererSchemas.patchUi, (_e, patch: Partial<UiConfig>) => guard(() => this.patchUi(patch)));
     invoke(IPC.patchGlobal, RendererSchemas.patchGlobal, (_e, patch: Partial<GlobalConfig>) => guard(() => this.patchGlobal(patch)));
     invoke(IPC.setOverlay, RendererSchemas.setOverlay, (_e, on) => guard(() => this.accounts.setOverlay(on)));
+    invoke(IPC.windowMinimize, RendererSchemas.windowMinimize, () => { this.win.minimize(); return { ok: true }; });
+    invoke(IPC.windowToggleMaximize, RendererSchemas.windowToggleMaximize, () => {
+      if (this.win.isMaximized()) this.win.unmaximize();
+      else this.win.maximize();
+      return { ok: true };
+    });
+    invoke(IPC.windowClose, RendererSchemas.windowClose, () => { this.win.close(); return { ok: true }; });
     invoke(IPC.clearActivity, RendererSchemas.clearActivity, () => guard(() => { this.activity = []; this.scheduleState(); }));
 
     // saved login / autofill
@@ -398,6 +427,7 @@ class AppController {
     on(IPC.obMetrics, ObserverSchemas.obMetrics, (_e, p) => {
       this.onRuntime(p.accountId, { unread: p.unread, mentions: p.mentions });
     });
+    on(IPC.obTheme, ObserverSchemas.obTheme, (_e, p) => this.onTheme(p));
     on(IPC.obConnection, ObserverSchemas.obConnection, (_e, p) => {
       this.accounts.setConnection(p.accountId, p.state as ConnectionState);
     });
