@@ -63,9 +63,10 @@ export class ConfigStore {
 
 function mergeDefaults(raw: Partial<AppConfig>): AppConfig {
   const d = defaultConfig();
+  const global = { ...d.global, ...raw.global };
   return {
     ui: { ...d.ui, ...raw.ui },
-    global: { ...d.global, ...raw.global },
+    global: { ...global, pushToTalk: { ...d.global.pushToTalk, ...raw.global?.pushToTalk } },
     accountsOrder: raw.accountsOrder ?? [],
     accounts: raw.accounts ?? {},
     lastActiveId: raw.lastActiveId ?? null,

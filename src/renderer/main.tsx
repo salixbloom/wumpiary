@@ -8,11 +8,11 @@ import './styles.css';
 api.getState().then(useStore.getState().setState);
 api.onState(useStore.getState().setState);
 
-// Per-account chimes are driven from here so each account can have its own sound.
-api.onPlayChime(({ chime }) => {
+// Renderer owns short UI sound playback; main only decides which sound to play.
+function playSound(sound: string) {
   try {
-    if (chime && chime !== 'default') {
-      const a = new Audio(chime.startsWith('file:') ? chime : `file://${chime}`);
+    if (sound && sound !== 'default' && sound !== 'none') {
+      const a = new Audio(isSoundUrl(sound) ? sound : `file://${sound}`);
       a.play().catch(() => undefined);
     } else {
       // built-in default blip
@@ -29,7 +29,15 @@ api.onPlayChime(({ chime }) => {
   } catch {
     /* audio not available */
   }
-});
+}
+
+function isSoundUrl(sound: string) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(sound);
+}
+
+// Per-account chimes are driven from here so each account can have its own sound.
+api.onPlayChime(({ chime }) => playSound(chime));
+api.onPlaySound(({ sound }) => playSound(sound));
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

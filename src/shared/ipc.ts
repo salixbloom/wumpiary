@@ -41,6 +41,7 @@ export const IPC = {
   // main -> renderer (events)
   stateChanged: 'app:stateChanged',
   playChime: 'app:playChime',
+  playSound: 'app:playSound',
   promptAutofill: 'app:promptAutofill', // ask the renderer to open the autofill PIN modal
 
   // account-observer preload <-> main
@@ -49,6 +50,7 @@ export const IPC = {
   obNotification: 'observer:notification',
   obConnection: 'observer:connection',
   obFill: 'observer:fill', // main -> view: fill the login form (observe-only exception)
+  obPushToTalk: 'observer:pushToTalk', // main -> view: gate wrapped microphone streams
 
   // main <-> sandboxed plugin host
   phMsg: 'pluginhost:msg', // main -> host (load/unload/event/accounts)

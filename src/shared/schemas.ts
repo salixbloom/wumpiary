@@ -69,6 +69,19 @@ const GlobalPatch = z
     startMinimized: z.boolean(),
     autoLockMinutes: z.number().int().min(0).max(1440),
     autoHibernateMinutes: z.number().int().min(0).max(1440),
+    pushToTalk: z
+      .object({
+        enabled: z.boolean(),
+        key: z.string().min(1).max(64),
+        ctrl: z.boolean(),
+        alt: z.boolean(),
+        shift: z.boolean(),
+        meta: z.boolean(),
+        activateSound: z.string().max(4096),
+        deactivateSound: z.string().max(4096),
+      })
+      .partial()
+      .strict(),
   })
   .partial()
   .strict();

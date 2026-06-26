@@ -8,6 +8,7 @@ const IPC = {
   obNotification: 'observer:notification',
   obConnection: 'observer:connection',
   obFill: 'observer:fill',
+  obPushToTalk: 'observer:pushToTalk',
 } as const;
 
 // OBSERVE-ONLY bridge injected into each Discord account view. It never changes
@@ -17,6 +18,7 @@ const IPC = {
 // user's behalf. See PLAN.md §4 / §10.
 
 const accountId = process.argv.find((a) => a.startsWith('--acct='))?.slice('--acct='.length) ?? '?';
+const initialPushToTalkEnabled = process.argv.includes('--ptt-enabled=1');
 
 // Injected into the page's MAIN world (bypasses CSP via webFrame; required to
 // wrap window.Notification and read document.title). It only posts messages out
@@ -42,6 +44,67 @@ const INJECT = `(() => {
     Wump.requestPermission = (cb) => { if (cb) cb('granted'); return Promise.resolve('granted'); };
     Wump.maxActions = (Orig && Orig.maxActions) || 0;
     window.Notification = Wump;
+  } catch (e) {}
+
+  // App-level push-to-talk: Discord still uses voice activity, but any
+  // microphone stream it receives is routed through a gain node that the shell
+  // can close unless the configured key is held.
+  try {
+    const media = navigator.mediaDevices;
+    const originalGetUserMedia = media && media.getUserMedia && media.getUserMedia.bind(media);
+    const ptt = { enabled: ${initialPushToTalkEnabled}, pressed: false, gains: new Set() };
+    const targetGain = () => (ptt.enabled && !ptt.pressed ? 0 : 1);
+    const updateGains = () => {
+      for (const gain of Array.from(ptt.gains)) {
+        try {
+          const t = gain.context.currentTime;
+          gain.gain.cancelScheduledValues(t);
+          gain.gain.setTargetAtTime(targetGain(), t, 0.008);
+        } catch (e) {
+          ptt.gains.delete(gain);
+        }
+      }
+    };
+    window.__wumpSetPushToTalk = (state) => {
+      ptt.enabled = !!(state && state.enabled);
+      ptt.pressed = !!(state && state.pressed);
+      updateGains();
+    };
+    const wantsAudio = (constraints) => {
+      if (!constraints) return false;
+      return constraints.audio !== undefined && constraints.audio !== false;
+    };
+    const wrapStream = (stream) => {
+      if (!stream || !stream.getAudioTracks || stream.getAudioTracks().length === 0) return stream;
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return stream;
+      const ctx = new AudioContextCtor();
+      const source = ctx.createMediaStreamSource(stream);
+      const gain = ctx.createGain();
+      const destination = ctx.createMediaStreamDestination();
+      gain.gain.value = targetGain();
+      ptt.gains.add(gain);
+      source.connect(gain);
+      gain.connect(destination);
+      const out = new MediaStream([
+        ...destination.stream.getAudioTracks(),
+        ...stream.getVideoTracks(),
+      ]);
+      const cleanup = () => {
+        ptt.gains.delete(gain);
+        try { source.disconnect(); } catch (e) {}
+        try { gain.disconnect(); } catch (e) {}
+        try { ctx.close(); } catch (e) {}
+      };
+      for (const track of stream.getTracks()) track.addEventListener('ended', cleanup, { once: true });
+      return out;
+    };
+    if (originalGetUserMedia) {
+      media.getUserMedia = async (constraints) => {
+        const stream = await originalGetUserMedia(constraints);
+        return wantsAudio(constraints) ? wrapStream(stream) : stream;
+      };
+    }
   } catch (e) {}
 
   // Unread / mention counts from the document title (e.g. "(3) Discord").
@@ -133,6 +196,15 @@ ipcRenderer.on(IPC.obFill, (_e, p: { email?: string; password?: Uint8Array | nul
     pw = '';
     try { if (p.password) (p.password as Uint8Array).fill(0); } catch { /* ignore */ }
   }
+});
+
+ipcRenderer.on(IPC.obPushToTalk, (_e, p: { enabled: boolean; pressed: boolean }) => {
+  webFrame.executeJavaScript(
+    `window.__wumpSetPushToTalk && window.__wumpSetPushToTalk(${JSON.stringify({
+      enabled: !!p.enabled,
+      pressed: !!p.pressed,
+    })})`,
+  ).catch(() => undefined);
 });
 
 // Relay main-world messages (shared DOM EventTarget crosses isolated worlds).

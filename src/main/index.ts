@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, IpcMainInvokeEvent, IpcMainEvent, Notification, powerMonitor, session } from 'electron';
+import { app, BrowserWindow, ipcMain, IpcMainInvokeEvent, IpcMainEvent, net, Notification, powerMonitor, protocol, session } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
+import { pathToFileURL } from 'url';
 import type { z } from 'zod';
 import { RendererSchemas, ObserverSchemas } from '../shared/schemas';
 import { ConfigStore } from './config';
@@ -9,10 +10,11 @@ import { AccountManager } from './accounts';
 import { NotificationRouter, ObserverNotification } from './notifications';
 import { AppTray } from './tray';
 import { registerHotkeys, unregisterHotkeys } from './hotkeys';
+import { PushToTalkHook } from './push-to-talk-hook';
 import { initUpdater } from './updater';
 import { PluginManager } from './plugins';
 import { IPC } from '../shared/ipc';
-import { AccountPatch, AccountRuntime, ActivityEntry, AppState, ConnectionState, GlobalConfig, ShellTheme, UiConfig } from '../shared/types';
+import { AccountPatch, AccountRuntime, ActivityEntry, AppState, ConnectionState, GlobalConfig, GlobalPatch, ShellTheme, UiConfig } from '../shared/types';
 
 class AppController {
   private cfg = new ConfigStore();
@@ -31,11 +33,22 @@ class AppController {
   private lockoutUntil = 0;
   private isQuitting = false;
   private stateTimer: NodeJS.Timeout | null = null;
+  private pushToTalkPressed = false;
+  private pushToTalkHook = new PushToTalkHook((pressed) => {
+    this.setPushToTalkPressed(pressed, true);
+  });
 
   start() {
     this.applyChromeCsp();
+    this.registerAppProtocol();
     this.createWindow();
-    this.accounts = new AccountManager(this.win, path.join(__dirname, '../preload/account-observer.js'), this.cfg, (id, patch) => this.onRuntime(id, patch));
+    this.accounts = new AccountManager(
+      this.win,
+      path.join(__dirname, '../preload/account-observer.js'),
+      this.cfg,
+      (id, patch) => this.onRuntime(id, patch),
+      (input) => this.onPushToTalkInput(input),
+    );
     this.plugins = new PluginManager(
       path.join(__dirname, '../preload/plugin-host.js'),
       (css) => this.accounts.setPluginCss(css),
@@ -84,9 +97,24 @@ class AppController {
    */
   private applyChromeCsp() {
     if (process.env['ELECTRON_RENDERER_URL']) return; // dev
-    const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; media-src 'self' file:; connect-src 'self'";
+    const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: wumpiary:; media-src 'self' file: wumpiary:; connect-src 'self'";
     session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
       cb({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
+    });
+  }
+
+  private registerAppProtocol() {
+    protocol.handle('wumpiary', (request) => {
+      const url = new URL(request.url);
+      if (url.hostname !== 'sfx') return new Response(null, { status: 404 });
+      const requested = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+      const allowed = new Set([
+        'ptta.mp3',
+        'pttd.mp3',
+      ]);
+      if (!allowed.has(requested)) return new Response(null, { status: 404 });
+      const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
+      return net.fetch(pathToFileURL(path.join(base, 'resources', 'sfx', requested)).toString());
     });
   }
 
@@ -117,11 +145,17 @@ class AppController {
     this.win.webContents.on('console-message', (_e, level, msg) => {
       if (level >= 2) console.warn('[renderer]', msg);
     });
+    this.win.webContents.on('before-input-event', (_e, input) => this.onPushToTalkInput(input));
 
     this.win.on('ready-to-show', () => {
       if (!this.cfg.get().global.startMinimized) this.win.show();
     });
     this.win.on('resize', () => this.accounts.layout());
+    this.win.on('blur', () => {
+      if (!this.pushToTalkHook.status().active && this.pushToTalkPressed) {
+        this.setPushToTalkPressed(false, true);
+      }
+    });
     this.win.on('close', (e) => {
       if (!this.isQuitting) {
         e.preventDefault();
@@ -188,6 +222,7 @@ class AppController {
       plugins: this.plugins?.getInfos() ?? [],
       savedLogins: this.vault.unlocked ? this.vault.listCredentials() : {},
       shellTheme: this.accounts?.activeId ? this.shellThemes[this.accounts.activeId] ?? null : null,
+      pushToTalkStatus: this.pushToTalkHook.status(),
     };
   }
 
@@ -228,6 +263,7 @@ class AppController {
     this.accounts.setOverlay(false);
     this.plugins.startHost(); // load plugins only after the user has unlocked
     this.applyGlobal();
+    this.applyPushToTalk();
     this.scheduleState();
   }
 
@@ -272,10 +308,71 @@ class AppController {
     this.scheduleState();
   }
 
-  private patchGlobal(patch: Partial<GlobalConfig>) {
-    this.cfg.update((c) => Object.assign(c.global, patch));
+  private patchGlobal(patch: GlobalPatch) {
+    this.cfg.update((c) => {
+      const { pushToTalk, ...rest } = patch;
+      Object.assign(c.global, rest);
+      if (pushToTalk) Object.assign(c.global.pushToTalk, pushToTalk);
+    });
     this.applyGlobal();
+    this.applyPushToTalk();
     this.scheduleState();
+  }
+
+  private onPushToTalkInput(input: { type?: string; code?: string; control?: boolean; alt?: boolean; shift?: boolean; meta?: boolean }) {
+    const ptt = this.cfg.get().global.pushToTalk;
+    if (!ptt.enabled || isModifierCode(ptt.key)) return;
+    if (input.type === 'keyDown' && !this.matchesPushToTalk(input, ptt)) return;
+    if (input.type === 'keyUp' && input.code !== ptt.key) return;
+    const pressed = input.type === 'keyDown';
+    this.setPushToTalkPressed(pressed, true);
+  }
+
+  private matchesPushToTalk(
+    input: { code?: string; control?: boolean; alt?: boolean; shift?: boolean; meta?: boolean },
+    ptt: GlobalConfig['pushToTalk'],
+  ) {
+    return (
+      input.code === ptt.key &&
+      !!input.control === ptt.ctrl &&
+      !!input.alt === ptt.alt &&
+      !!input.shift === ptt.shift &&
+      !!input.meta === ptt.meta
+    );
+  }
+
+  private applyPushToTalk() {
+    const enabled = this.cfg.get().global.pushToTalk.enabled;
+    this.pushToTalkHook.configure(this.cfg.get().global.pushToTalk);
+    if (!enabled) this.setPushToTalkPressed(false, false);
+    this.broadcastPushToTalk();
+  }
+
+  private setPushToTalkPressed(pressed: boolean, audible: boolean) {
+    if (this.pushToTalkPressed === pressed) return;
+    this.pushToTalkPressed = pressed;
+    this.broadcastPushToTalk();
+    if (audible && this.cfg.get().global.pushToTalk.enabled) this.playPushToTalkSound(pressed ? 'activate' : 'deactivate');
+  }
+
+  private broadcastPushToTalk() {
+    const enabled = this.cfg.get().global.pushToTalk.enabled;
+    this.accounts?.setPushToTalkState(enabled, this.pushToTalkPressed);
+  }
+
+  private playPushToTalkSound(kind: 'activate' | 'deactivate') {
+    const ptt = this.cfg.get().global.pushToTalk;
+    const configured = kind === 'activate' ? ptt.activateSound : ptt.deactivateSound;
+    const sound = this.resolvePushToTalkSound(configured, kind);
+    if (sound !== 'none') this.win.webContents.send(IPC.playSound, { sound });
+  }
+
+  private resolvePushToTalkSound(configured: string, kind: 'activate' | 'deactivate') {
+    if (!configured || configured === 'default') {
+      const file = kind === 'activate' ? 'ptta.mp3' : 'pttd.mp3';
+      return `wumpiary://sfx/${encodeURIComponent(file)}`;
+    }
+    return configured;
   }
 
   private onTheme(theme: ShellTheme & { accountId?: string }) {
@@ -378,7 +475,7 @@ class AppController {
     }));
 
     invoke(IPC.patchUi, RendererSchemas.patchUi, (_e, patch: Partial<UiConfig>) => guard(() => this.patchUi(patch)));
-    invoke(IPC.patchGlobal, RendererSchemas.patchGlobal, (_e, patch: Partial<GlobalConfig>) => guard(() => this.patchGlobal(patch)));
+    invoke(IPC.patchGlobal, RendererSchemas.patchGlobal, (_e, patch: GlobalPatch) => guard(() => this.patchGlobal(patch)));
     invoke(IPC.setOverlay, RendererSchemas.setOverlay, (_e, on) => guard(() => this.accounts.setOverlay(on)));
     invoke(IPC.setWindowBackground, RendererSchemas.setWindowBackground, (_e, color) => {
       this.win.setBackgroundColor(color || '#1e1f22');
@@ -460,11 +557,16 @@ class AppController {
 
   shutdown() {
     unregisterHotkeys();
+    this.pushToTalkHook.stop();
     this.cfg.flush();
     this.accounts?.destroyAll();
     this.plugins?.destroy();
     this.tray?.destroy();
   }
+}
+
+function isModifierCode(code: string) {
+  return code === 'ControlLeft' || code === 'ControlRight' || code === 'AltLeft' || code === 'AltRight' || code === 'ShiftLeft' || code === 'ShiftRight' || code === 'MetaLeft' || code === 'MetaRight';
 }
 
 // ---- bootstrap -----------------------------------------------------------
@@ -474,6 +576,10 @@ class AppController {
 // Fall back to software compositing there. Must run before app is ready.
 const isWsl = os.release().toLowerCase().includes('microsoft') || !!process.env['WSL_DISTRO_NAME'];
 if (isWsl) app.disableHardwareAcceleration();
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'wumpiary', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();

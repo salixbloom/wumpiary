@@ -66,6 +66,26 @@ export interface GlobalConfig {
   startMinimized: boolean;
   autoLockMinutes: number; // 0 = off
   autoHibernateMinutes: number; // 0 = off
+  pushToTalk: {
+    enabled: boolean;
+    key: string;
+    ctrl: boolean;
+    alt: boolean;
+    shift: boolean;
+    meta: boolean;
+    activateSound: string;
+    deactivateSound: string;
+  };
+}
+
+export type GlobalPatch = Partial<Omit<GlobalConfig, 'pushToTalk'>> & {
+  pushToTalk?: Partial<GlobalConfig['pushToTalk']>;
+};
+
+export interface PushToTalkStatus {
+  available: boolean;
+  active: boolean;
+  error?: string;
 }
 
 export interface AppConfig {
@@ -109,6 +129,8 @@ export interface AppState {
   savedLogins: Record<string, { email: boolean; password: boolean }>;
   /** Best-effort Discord theme tokens observed from the active account view. */
   shellTheme: ShellTheme | null;
+  /** Native global key hook status for app-level push to talk. */
+  pushToTalkStatus: PushToTalkStatus;
 }
 
 export type AccountPatch = Partial<
@@ -125,7 +147,24 @@ export const defaultAccountColors = [
 export function defaultConfig(): AppConfig {
   return {
     ui: { sidebarSide: 'right', sidebarCollapsed: false, sidebarWidth: 248, theme: 'dark', accent: '#5865F2' },
-    global: { dnd: false, hidePreviews: false, autoLaunch: false, startMinimized: false, autoLockMinutes: 0, autoHibernateMinutes: 0 },
+    global: {
+      dnd: false,
+      hidePreviews: false,
+      autoLaunch: false,
+      startMinimized: false,
+      autoLockMinutes: 0,
+      autoHibernateMinutes: 0,
+      pushToTalk: {
+        enabled: false,
+        key: 'Space',
+        ctrl: false,
+        alt: false,
+        shift: false,
+        meta: false,
+        activateSound: 'default',
+        deactivateSound: 'default',
+      },
+    },
     accountsOrder: [],
     accounts: {},
     lastActiveId: null,

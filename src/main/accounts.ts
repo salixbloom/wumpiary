@@ -25,12 +25,15 @@ export class AccountManager {
   /** Combined cosmetic CSS contributed by plugins (discord-css permission). */
   private pluginCss = '';
   private cssKeys = new Map<string, string>(); // viewId -> insertCSS handle
+  private pttEnabled = false;
+  private pttPressed = false;
 
   constructor(
     private win: BrowserWindow,
     private observerPreload: string,
     private cfg: ConfigStore,
     private onRuntime: (id: string, patch: Partial<AccountRuntime>) => void,
+    private onInput?: (input: { type?: string; code?: string; control?: boolean; alt?: boolean; shift?: boolean; meta?: boolean }) => void,
   ) {}
 
   /** Recreate connected views on launch (crash/restart recovery). */
@@ -56,7 +59,7 @@ export class AccountManager {
         contextIsolation: true,
         sandbox: true,
         spellcheck: true,
-        additionalArguments: [`--acct=${id}`],
+        additionalArguments: [`--acct=${id}`, `--ptt-enabled=${this.cfg.get().global.pushToTalk.enabled ? '1' : '0'}`],
       },
     });
     const wc = view.webContents;
@@ -71,7 +74,11 @@ export class AccountManager {
     });
 
     // Re-apply plugin CSS after every navigation (insertCSS is cleared on load).
-    wc.on('dom-ready', () => this.applyCssTo(id));
+    wc.on('dom-ready', () => {
+      this.applyCssTo(id);
+      this.sendPushToTalkState(view);
+    });
+    wc.on('before-input-event', (_e, input) => this.onInput?.(input));
 
     wc.on('did-start-loading', () => this.onRuntime(id, { connection: 'loading' }));
     wc.on('did-fail-load', (_e, code) => {
@@ -218,6 +225,16 @@ export class AccountManager {
     if (!view || view.webContents.isDestroyed()) return false;
     view.webContents.send(IPC.obFill, { email, password: password ? new Uint8Array(password) : null });
     return true;
+  }
+
+  setPushToTalkState(enabled: boolean, pressed: boolean) {
+    this.pttEnabled = enabled;
+    this.pttPressed = pressed;
+    for (const view of this.views.values()) this.sendPushToTalkState(view);
+  }
+
+  private sendPushToTalkState(view: WebContentsView) {
+    if (!view.webContents.isDestroyed()) view.webContents.send(IPC.obPushToTalk, { enabled: this.pttEnabled, pressed: this.pttPressed });
   }
 
   openDevtools(id: string) {

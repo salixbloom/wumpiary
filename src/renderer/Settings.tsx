@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from './store';
-import type { AppState, NotificationFilter, CallPolicy, Theme } from '../shared/types';
+import type { AppState, NotificationFilter, CallPolicy, Theme, GlobalConfig } from '../shared/types';
 import { PERMISSION_LABELS } from '../shared/plugins';
 
 export type SettingsTab = 'general' | 'account' | 'activity' | 'plugins' | 'about';
@@ -84,6 +84,31 @@ function General({ state }: { state: AppState }) {
         <Toggle on={global.hidePreviews} onChange={(v) => api.patchGlobal({ hidePreviews: v })} />
       </Row>
 
+      <h3>Voice</h3>
+      <Row label="Push to Talk" hint="gates the microphone while Discord uses voice activity">
+        <Toggle on={global.pushToTalk.enabled} onChange={(v) => api.patchGlobal({ pushToTalk: { enabled: v } })} />
+      </Row>
+      <Row label="Push to Talk key">
+        <HotkeyCapture value={global.pushToTalk} onChange={(pushToTalk) => api.patchGlobal({ pushToTalk })} />
+      </Row>
+      <Row label="Activation sound" hint="file path; blank = bundled sound">
+        <input
+          placeholder="default"
+          value={global.pushToTalk.activateSound === 'default' ? '' : global.pushToTalk.activateSound}
+          onChange={(e) => api.patchGlobal({ pushToTalk: { activateSound: e.target.value || 'default' } })}
+        />
+      </Row>
+      <Row label="Deactivation sound" hint="file path; blank = bundled sound">
+        <input
+          placeholder="default"
+          value={global.pushToTalk.deactivateSound === 'default' ? '' : global.pushToTalk.deactivateSound}
+          onChange={(e) => api.patchGlobal({ pushToTalk: { deactivateSound: e.target.value || 'default' } })}
+        />
+      </Row>
+      {global.pushToTalk.enabled && (
+        <p className="note">{pushToTalkStatusText(state)}</p>
+      )}
+
       <h3>Startup &amp; security</h3>
       <Row label="Launch at login">
         <Toggle on={global.autoLaunch} onChange={(v) => api.patchGlobal({ autoLaunch: v })} />
@@ -113,6 +138,81 @@ function General({ state }: { state: AppState }) {
       <p className="note">Connected accounts stay live in the background (their gateway never sleeps), and only the active one is rendered. Hibernation is the only way to free an account's memory — at the cost of its notifications.</p>
     </section>
   );
+}
+
+function pushToTalkStatusText(state: AppState) {
+  const status = state.pushToTalkStatus;
+  if (status.active) return 'Global key capture is active.';
+  if (status.error) return `Global key capture is unavailable: ${status.error}`;
+  return 'Using focused-window key capture until global key capture starts.';
+}
+
+function HotkeyCapture({
+  value,
+  onChange,
+}: {
+  value: GlobalConfig['pushToTalk'];
+  onChange: (value: Partial<GlobalConfig['pushToTalk']>) => void;
+}) {
+  const [recording, setRecording] = React.useState(false);
+  const ignoreNextClick = React.useRef(false);
+  const capture = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!recording || e.type !== 'keydown') return;
+    e.preventDefault();
+    e.stopPropagation();
+    ignoreNextClick.current = true;
+    if (e.code === 'Escape') {
+      setRecording(false);
+      return;
+    }
+    if (isModifierCode(e.code)) return;
+    onChange({
+      key: e.code,
+      ctrl: e.ctrlKey,
+      alt: e.altKey,
+      shift: e.shiftKey,
+      meta: false,
+    });
+    setRecording(false);
+  };
+  return (
+    <button
+      type="button"
+      className={`hotkey-capture ${recording ? 'recording' : ''}`}
+      onClick={() => {
+        if (ignoreNextClick.current) {
+          ignoreNextClick.current = false;
+          return;
+        }
+        setRecording(true);
+      }}
+      onKeyDown={capture}
+      onBlur={() => setRecording(false)}
+    >
+      {recording ? 'Press key combo...' : formatHotkey(value)}
+    </button>
+  );
+}
+
+function formatHotkey(value: GlobalConfig['pushToTalk']) {
+  const parts = [
+    value.ctrl && 'Ctrl',
+    value.alt && 'Alt',
+    value.shift && 'Shift',
+    readableKey(value.key),
+  ].filter(Boolean);
+  return parts.join(' + ');
+}
+
+function readableKey(code: string) {
+  if (code === 'Space') return 'Space';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  return code.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
+function isModifierCode(code: string) {
+  return code === 'ControlLeft' || code === 'ControlRight' || code === 'AltLeft' || code === 'AltRight' || code === 'ShiftLeft' || code === 'ShiftRight' || code === 'MetaLeft' || code === 'MetaRight';
 }
 
 function AccountSettings({ state, accountId, onSelectAccount }: { state: AppState; accountId: string | null; onSelectAccount: (id: string) => void }) {

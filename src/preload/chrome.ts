@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc';
-import type { AccountPatch, AppState, GlobalConfig, UiConfig } from '../shared/types';
+import type { AccountPatch, AppState, GlobalPatch, UiConfig } from '../shared/types';
 import type { PluginPermission } from '../shared/plugins';
 
 export interface UnlockResult {
@@ -28,7 +28,7 @@ const api = {
   snooze: (id: string, until: number | null) => ipcRenderer.invoke(IPC.snooze, id, until),
 
   patchUi: (patch: Partial<UiConfig>) => ipcRenderer.invoke(IPC.patchUi, patch),
-  patchGlobal: (patch: Partial<GlobalConfig>) => ipcRenderer.invoke(IPC.patchGlobal, patch),
+  patchGlobal: (patch: GlobalPatch) => ipcRenderer.invoke(IPC.patchGlobal, patch),
   setOverlay: (on: boolean) => ipcRenderer.invoke(IPC.setOverlay, on),
   setWindowBackground: (color: string) => ipcRenderer.invoke(IPC.setWindowBackground, color),
   minimizeWindow: () => ipcRenderer.invoke(IPC.windowMinimize),
@@ -54,6 +54,11 @@ const api = {
     const l = (_e: unknown, p: { accountId: string; chime: string }) => cb(p);
     ipcRenderer.on(IPC.playChime, l);
     return () => ipcRenderer.removeListener(IPC.playChime, l);
+  },
+  onPlaySound: (cb: (p: { sound: string }) => void): (() => void) => {
+    const l = (_e: unknown, p: { sound: string }) => cb(p);
+    ipcRenderer.on(IPC.playSound, l);
+    return () => ipcRenderer.removeListener(IPC.playSound, l);
   },
   onPromptAutofill: (cb: (p: { accountId: string }) => void): (() => void) => {
     const l = (_e: unknown, p: { accountId: string }) => cb(p);

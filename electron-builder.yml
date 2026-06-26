@@ -11,6 +11,9 @@ files:
   - out/**/*
   - package.json
   - '!**/*.map'
+extraResources:
+  - from: resources
+    to: resources
 
 asar: true
 # electron-builder reads electronVersion from the installed `electron` dep.
