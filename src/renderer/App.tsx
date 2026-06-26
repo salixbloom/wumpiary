@@ -152,9 +152,9 @@ function applyShellVars(root: HTMLElement, vars: ShellVars) {
 }
 
 function AppFrame({ children, themeWipe }: { children: React.ReactNode; themeWipe: { id: number; color: string } | null }) {
+  const frameStyle = themeWipe ? ({ '--wipe-color': themeWipe.color } as React.CSSProperties) : undefined;
   return (
-    <div className="app-frame">
-      {themeWipe && <div key={themeWipe.id} className="theme-wipe" style={{ '--wipe-color': themeWipe.color } as React.CSSProperties} />}
+    <div className={`app-frame ${themeWipe ? 'theme-revealing' : ''}`} style={frameStyle}>
       <div className="titlebar">
         <div className="titlebar-brand">wumpiary</div>
         <div className="window-controls">

@@ -53,14 +53,32 @@ input, select { font: inherit; }
 
 /* ---- layout ---- */
 .app-frame { height: 100%; display: flex; flex-direction: column; background: var(--app-frame-background); position: relative; overflow: hidden; }
-.theme-wipe {
-  position: fixed; left: 0; bottom: 0; z-index: 0; pointer-events: none;
-  width: 300vmax; height: 300vmax; border-radius: 50%;
-  background: radial-gradient(circle, var(--wipe-color) 0%, var(--wipe-color) 36%, color-mix(in srgb, var(--wipe-color) 70%, transparent) 50%, color-mix(in srgb, var(--wipe-color) 30%, transparent) 66%, rgba(0,0,0,0) 82%);
+.theme-revealing .titlebar,
+.theme-revealing .sidebar,
+.theme-revealing .stage {
+  overflow: hidden;
+  isolation: isolate;
+}
+.theme-revealing .titlebar::before,
+.theme-revealing .sidebar::before,
+.theme-revealing .stage::before {
+  content: '';
+  position: absolute; left: 0; bottom: 0; z-index: 0; pointer-events: none;
+  width: 260vmax; height: 260vmax; border-radius: 50%;
+  background: radial-gradient(circle, var(--wipe-color) 0%, var(--wipe-color) 24%, color-mix(in srgb, var(--wipe-color) 62%, transparent) 44%, color-mix(in srgb, var(--wipe-color) 24%, transparent) 64%, rgba(0,0,0,0) 86%);
   transform: translate(-50%, 50%) scale(.01);
   transform-origin: center;
   will-change: transform;
   animation: theme-wipe 900ms cubic-bezier(.16, 1, .3, 1) forwards;
+}
+.theme-revealing .titlebar-brand,
+.theme-revealing .window-controls,
+.theme-revealing .sidebar-head,
+.theme-revealing .perches,
+.theme-revealing .sidebar-foot,
+.theme-revealing .stage > * {
+  position: relative;
+  z-index: 1;
 }
 @keyframes theme-wipe {
   from { transform: translate(-50%, 50%) scale(.01); }
@@ -103,6 +121,7 @@ input, select { font: inherit; }
 /* ---- sidebar ---- */
 .sidebar {
   display: flex; flex-direction: column;
+  position: relative;
   background: var(--shell-bg-2, var(--bg-2));
   color: var(--shell-text, var(--text));
   border-left: 1px solid var(--shell-border, var(--border));
