@@ -5,6 +5,7 @@ import { IPC } from '../shared/ipc';
 import { AccountRuntime, ConnectionState, defaultAccountColors, newAccountConfig } from '../shared/types';
 
 const DISCORD_URL = 'https://discord.com/app';
+const DISCORD_LOGIN_URL = 'https://discord.com/login';
 const TITLE_BAR_HEIGHT = 34;
 
 /**
@@ -49,7 +50,7 @@ export class AccountManager {
     this.layout();
   }
 
-  private createView(id: string): WebContentsView {
+  private createView(id: string, url = DISCORD_URL): WebContentsView {
     const acc = this.cfg.get().accounts[id];
     const view = new WebContentsView({
       webPreferences: {
@@ -95,7 +96,7 @@ export class AccountManager {
 
     view.setVisible(false);
     this.win.contentView.addChildView(view);
-    wc.loadURL(DISCORD_URL);
+    wc.loadURL(url);
     this.views.set(id, view);
     this.lastActive.set(id, Date.now());
     this.onRuntime(id, { connection: 'loading' });
@@ -155,11 +156,22 @@ export class AccountManager {
   async signOut(id: string) {
     const acc = this.cfg.get().accounts[id];
     if (!acc) return;
-    const ses = ses_for(acc.partition);
-    await ses.clearStorageData();
-    this.cfg.update((c) => (c.accounts[id].signedIn = false));
+    const wasActive = this.activeId === id;
     const view = this.views.get(id);
-    if (view) view.webContents.loadURL(DISCORD_URL);
+    if (view) {
+      this.win.contentView.removeChildView(view);
+      view.webContents.close();
+      this.views.delete(id);
+    }
+    const ses = ses_for(acc.partition);
+    await ses.clearStorageData({
+      storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage'],
+    });
+    await ses.clearCache();
+    this.cfg.update((c) => (c.accounts[id].signedIn = false));
+    this.createView(id, DISCORD_LOGIN_URL);
+    if (wasActive) this.setActive(id);
+    this.layout();
     this.onRuntime(id, { connection: 'signed-out', unread: 0, mentions: 0 });
   }
 

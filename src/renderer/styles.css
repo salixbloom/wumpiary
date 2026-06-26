@@ -236,6 +236,10 @@ input[type='password'], input[type='text'], input:not([type]), select {
 input:focus, select:focus { border-color: var(--accent); }
 button.primary { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 9px 16px; font-weight: 600; width: 100%; }
 button.primary:hover { filter: brightness(1.08); }
+button.secondary { background: var(--bg-2); color: var(--text); border: 1px solid var(--bg-hover); border-radius: 8px; padding: 9px 16px; }
+button.secondary:hover { background: var(--bg-hover); }
+button.danger { background: transparent; color: var(--red); border: 1px solid var(--red); border-radius: 8px; padding: 9px 16px; font-weight: 600; }
+button.danger:hover { background: var(--red); color: #fff; }
 
 /* ---- settings modal ---- */
 .modal-backdrop { position: fixed; left: 0; right: 0; top: var(--titlebar-height); bottom: 0; background: rgba(0,0,0,0.5); display: grid; place-items: center; z-index: 100; }
@@ -298,4 +302,5 @@ button.primary:hover { filter: brightness(1.08); }
 .pin-modal input { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--bg-hover); background: var(--bg); color: var(--text); font: inherit; }
 .pin-error { color: var(--red); margin: 0; font-size: 13px; }
 .pin-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.pin-actions button { width: auto; }
 .cm-highlight { color: var(--accent); font-weight: 600; }

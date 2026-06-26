@@ -53,8 +53,8 @@ export function App() {
 
   // Hide the native account views whenever a full-window modal is open.
   useEffect(() => {
-    api.setOverlay(tab !== null);
-  }, [tab]);
+    api.setOverlay(tab !== null || autofillId !== null);
+  }, [tab, autofillId]);
 
   if (!state) return <AppFrame themeFade={themeFade}><div className="loading">Loading...</div></AppFrame>;
   if (state.locked) return <AppFrame themeFade={themeFade}><LockScreen hasVault={state.hasVault} encryptionAvailable={state.encryptionAvailable} /></AppFrame>;
@@ -239,7 +239,7 @@ function AutofillModal({ nickname, accountId, onClose }: { nickname: string; acc
         <input type="password" autoFocus inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
         {error && <p className="pin-error">{error}</p>}
         <div className="pin-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
           <button type="submit" className="primary" disabled={!pin || busy}>{busy ? 'Filling...' : 'Autofill'}</button>
         </div>
       </form>

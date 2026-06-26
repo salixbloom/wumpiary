@@ -116,10 +116,13 @@ const INJECT = `(() => {
     post({ __wump: 'metrics', unread: unread, mentions: mentions });
   }
   // Connection / auth state.
+  function hasLoginField() {
+    return !!document.querySelector('input[name=email], input[type=email], input[autocomplete=username], input[autocomplete=email], input[name=password], input[type=password], input[autocomplete=current-password]');
+  }
   function conn() {
     let state;
     if (!navigator.onLine) state = 'offline';
-    else if (location.pathname.indexOf('/login') === 0 || document.querySelector('input[name=email]')) state = 'signed-out';
+    else if (location.pathname.indexOf('/login') === 0 || hasLoginField()) state = 'signed-out';
     else state = 'connected';
     post({ __wump: 'conn', state: state });
   }
@@ -171,23 +174,42 @@ webFrame.executeJavaScript(INJECT).catch(() => undefined);
 // scripts can't read the credentials) and only sets the standard email/password
 // inputs via the native value setter + an `input` event so React picks them up.
 // The user still solves any captcha/2FA and clicks Log In themselves.
-function fillField(selector: string, value: string): boolean {
-  const el = document.querySelector(selector) as HTMLInputElement | null;
+function findField(selectors: string[]): HTMLInputElement | null {
+  for (const selector of selectors) {
+    const el = document.querySelector(selector) as HTMLInputElement | null;
+    if (el) return el;
+  }
+  return null;
+}
+
+function fillField(selectors: string[], value: string): boolean {
+  const el = findField(selectors);
   if (!el) return false;
+  el.focus();
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
   setter?.call(el, value);
   el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
   return true;
 }
 
 ipcRenderer.on(IPC.obFill, (_e, p: { email?: string; password?: Uint8Array | null }) => {
   let pw = '';
   try {
-    if (p.email) fillField('input[name=email]', p.email);
+    if (p.email) {
+      retryFill([
+        'input[name=email]',
+        'input[type=email]',
+        'input[autocomplete=username]',
+        'input[autocomplete=email]',
+      ], p.email);
+    }
     if (p.password && p.password.length) {
       pw = new TextDecoder().decode(p.password);
-      fillField('input[name=password]', pw);
+      retryFill([
+        'input[name=password]',
+        'input[type=password]',
+        'input[autocomplete=current-password]',
+      ], pw);
     }
   } catch {
     /* ignore */
@@ -197,6 +219,16 @@ ipcRenderer.on(IPC.obFill, (_e, p: { email?: string; password?: Uint8Array | nul
     try { if (p.password) (p.password as Uint8Array).fill(0); } catch { /* ignore */ }
   }
 });
+
+function retryFill(selectors: string[], value: string) {
+  let attempts = 0;
+  const run = () => {
+    attempts += 1;
+    if (fillField(selectors, value) || attempts >= 40) return;
+    window.setTimeout(run, 100);
+  };
+  run();
+}
 
 ipcRenderer.on(IPC.obPushToTalk, (_e, p: { enabled: boolean; pressed: boolean }) => {
   webFrame.executeJavaScript(

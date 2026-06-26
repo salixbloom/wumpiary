@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, IpcMainInvokeEvent, IpcMainEvent, net, Notification, powerMonitor, protocol, session } from 'electron';
+import { app, BrowserWindow, ipcMain, IpcMainInvokeEvent, IpcMainEvent, net, powerMonitor, protocol, session } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import { pathToFileURL } from 'url';
@@ -174,34 +174,12 @@ class AppController {
   }
 
   private onRuntime(id: string, patch: Partial<AccountRuntime>) {
-    const prev = this.runtime[id]?.connection;
+    const prevConnection = this.runtime[id]?.connection;
     Object.assign(this.ensureRuntime(id), patch);
-    // "Please log in again": an account that was connected dropped to the login
-    // screen. Surface it once (the loading -> signed-out path on first add/load
-    // is excluded so we don't nag for accounts that were never signed in).
-    if (patch.connection === 'signed-out' && prev && prev !== 'signed-out' && prev !== 'loading') {
-      this.notifySignedOut(id);
+    if (patch.connection === 'signed-out' && prevConnection !== 'signed-out' && id === this.accounts?.activeId) {
+      this.promptAutofillIfUseful(id);
     }
     this.scheduleState();
-  }
-
-  private notifySignedOut(id: string) {
-    if (this.locked) return;
-    const acc = this.cfg.get().accounts[id];
-    if (!acc) return;
-    const hasPw = this.vault.unlocked && !!this.vault.listCredentials()[id]?.password;
-    try {
-      const n = new Notification({
-        title: `${acc.nickname} — signed out`,
-        body: hasPw ? 'Discord asked it to sign in again. Click to autofill.' : 'Discord asked it to sign in again. Click to sign in.',
-        silent: false,
-      });
-      n.on('click', () => {
-        this.activate(id);
-        if (hasPw) this.win.webContents.send(IPC.promptAutofill, { accountId: id });
-      });
-      n.show();
-    } catch { /* no notification host */ }
   }
 
   private buildState(): AppState {
@@ -280,7 +258,15 @@ class AppController {
     this.showWindow();
     if (this.locked) return;
     this.accounts.setActive(id);
+    if (this.runtime[id]?.connection === 'signed-out') this.promptAutofillIfUseful(id);
     this.scheduleState();
+  }
+
+  private promptAutofillIfUseful(id: string) {
+    if (!this.vault.unlocked) return;
+    const creds = this.vault.listCredentials();
+    if (!creds[id]?.email) return;
+    this.win.webContents.send(IPC.promptAutofill, { accountId: id });
   }
 
   private cycle(dir: number) {
