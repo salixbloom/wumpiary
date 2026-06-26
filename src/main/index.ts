@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, powerMonitor, session } from 'electron';
 import * as path from 'path';
+import * as os from 'os';
 import { ConfigStore } from './config';
 import { Vault } from './vault';
 import { AccountManager } from './accounts';
@@ -93,9 +94,10 @@ class AppController {
     });
 
     const devUrl = process.env['ELECTRON_RENDERER_URL'];
-    if (devUrl) this.win.loadURL(devUrl);
-    else this.win.loadFile(path.join(__dirname, '../renderer/index.html')).catch((e) => console.error('[renderer] load failed', e));
+    if (devUrl) this.win.loadURL(devUrl).catch((e) => console.error('[main] loadURL failed', e));
+    else this.win.loadFile(path.join(__dirname, '../renderer/index.html')).catch((e) => console.error('[main] loadFile failed', e));
 
+    this.win.webContents.on('did-fail-load', (_e, code, desc, url) => console.error('[main] did-fail-load', code, desc, url));
     this.win.webContents.on('console-message', (_e, level, msg) => {
       if (level >= 2) console.warn('[renderer]', msg);
     });
@@ -322,6 +324,13 @@ class AppController {
 }
 
 // ---- bootstrap -----------------------------------------------------------
+// WSLg exposes no DRM render node (/dev/dri); Chromium's GPU process fails to
+// initialize against the d3d12 path ("Exiting GPU process due to errors during
+// initialization") and the window paints blank even though the DOM mounts.
+// Fall back to software compositing there. Must run before app is ready.
+const isWsl = os.release().toLowerCase().includes('microsoft') || !!process.env['WSL_DISTRO_NAME'];
+if (isWsl) app.disableHardwareAcceleration();
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
