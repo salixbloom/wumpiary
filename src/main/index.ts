@@ -1,6 +1,8 @@
-import { app, BrowserWindow, ipcMain, powerMonitor, session } from 'electron';
+import { app, BrowserWindow, ipcMain, IpcMainInvokeEvent, IpcMainEvent, powerMonitor, session } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
+import type { z } from 'zod';
+import { RendererSchemas, ObserverSchemas } from '../shared/schemas';
 import { ConfigStore } from './config';
 import { Vault } from './vault';
 import { AccountManager } from './accounts';
@@ -214,16 +216,44 @@ class AppController {
 
   // ---- IPC ---------------------------------------------------------------
   private registerIpc() {
-    ipcMain.handle(IPC.getState, () => this.buildState());
+    // Validate every inbound payload against its schema before dispatch; reject
+    // malformed messages (PLAN.md §11). `invoke` is request/response, `on` is
+    // fire-and-forget from the observer preloads.
+    const invoke = <A extends unknown[]>(
+      channel: string,
+      schema: z.ZodType<A>,
+      fn: (e: IpcMainInvokeEvent, ...args: A) => unknown,
+    ) => {
+      ipcMain.handle(channel, (e, ...args: unknown[]) => {
+        const r = schema.safeParse(args);
+        if (!r.success) {
+          console.warn(`[ipc] rejected ${channel}:`, r.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; '));
+          return { ok: false, error: 'invalid payload' };
+        }
+        return fn(e, ...(r.data as A));
+      });
+    };
+    const on = <A extends unknown[]>(
+      channel: string,
+      schema: z.ZodType<A>,
+      fn: (e: IpcMainEvent, ...args: A) => void,
+    ) => {
+      ipcMain.on(channel, (e, ...args: unknown[]) => {
+        const r = schema.safeParse(args);
+        if (r.success) fn(e, ...(r.data as A));
+      });
+    };
 
-    ipcMain.handle(IPC.setupPin, (_e, pin: string) => {
+    invoke(IPC.getState, RendererSchemas.getState, () => this.buildState());
+
+    invoke(IPC.setupPin, RendererSchemas.setupPin, (_e, pin) => {
       if (this.vault.hasVault) return { ok: false };
       this.vault.setup(pin);
       this.afterUnlock();
       return { ok: true };
     });
 
-    ipcMain.handle(IPC.unlock, (_e, pin: string) => {
+    invoke(IPC.unlock, RendererSchemas.unlock, (_e, pin) => {
       const now = Date.now();
       if (now < this.lockoutUntil) return { ok: false, waitMs: this.lockoutUntil - now };
       if (this.vault.unlock(pin)) {
@@ -236,24 +266,24 @@ class AppController {
       return { ok: false, attempts: this.failed };
     });
 
-    ipcMain.handle(IPC.lock, () => { this.lock(); return { ok: true }; });
+    invoke(IPC.lock, RendererSchemas.lock, () => { this.lock(); return { ok: true }; });
 
     const guard = <T>(fn: () => T) => (this.locked ? undefined : fn());
 
-    ipcMain.handle(IPC.addAccount, () => guard(() => this.accounts.add()));
-    ipcMain.handle(IPC.signOut, (_e, id: string) => guard(() => this.accounts.signOut(id)));
-    ipcMain.handle(IPC.forget, (_e, id: string) => guard(() => this.accounts.forget(id)));
-    ipcMain.handle(IPC.setActive, (_e, id: string) => guard(() => this.activate(id)));
-    ipcMain.handle(IPC.setHibernated, (_e, id: string, on: boolean) => guard(() => { this.accounts.setHibernated(id, on); this.scheduleState(); }));
-    ipcMain.handle(IPC.reload, (_e, id: string) => guard(() => this.accounts.reload(id)));
-    ipcMain.handle(IPC.openDevtools, (_e, id: string) => guard(() => this.accounts.openDevtools(id)));
+    invoke(IPC.addAccount, RendererSchemas.addAccount, () => guard(() => this.accounts.add()));
+    invoke(IPC.signOut, RendererSchemas.signOut, (_e, id) => guard(() => this.accounts.signOut(id)));
+    invoke(IPC.forget, RendererSchemas.forget, (_e, id) => guard(() => this.accounts.forget(id)));
+    invoke(IPC.setActive, RendererSchemas.setActive, (_e, id) => guard(() => this.activate(id)));
+    invoke(IPC.setHibernated, RendererSchemas.setHibernated, (_e, id, on) => guard(() => { this.accounts.setHibernated(id, on); this.scheduleState(); }));
+    invoke(IPC.reload, RendererSchemas.reload, (_e, id) => guard(() => this.accounts.reload(id)));
+    invoke(IPC.openDevtools, RendererSchemas.openDevtools, (_e, id) => guard(() => this.accounts.openDevtools(id)));
 
-    ipcMain.handle(IPC.reorder, (_e, order: string[]) => guard(() => {
+    invoke(IPC.reorder, RendererSchemas.reorder, (_e, order) => guard(() => {
       this.cfg.update((c) => { c.accountsOrder = order.filter((id) => c.accounts[id]); });
       this.scheduleState();
     }));
 
-    ipcMain.handle(IPC.updateAccount, (_e, id: string, patch: AccountPatch) => guard(() => {
+    invoke(IPC.updateAccount, RendererSchemas.updateAccount, (_e, id, patch: AccountPatch) => guard(() => {
       this.cfg.update((c) => {
         const a = c.accounts[id];
         if (!a) return;
@@ -268,24 +298,24 @@ class AppController {
       this.scheduleState();
     }));
 
-    ipcMain.handle(IPC.snooze, (_e, id: string, until: number | null) => guard(() => {
+    invoke(IPC.snooze, RendererSchemas.snooze, (_e, id, until) => guard(() => {
       this.cfg.update((c) => { if (c.accounts[id]) c.accounts[id].notifications.snoozeUntil = until; });
       this.scheduleState();
     }));
 
-    ipcMain.handle(IPC.patchUi, (_e, patch: Partial<UiConfig>) => guard(() => this.patchUi(patch)));
-    ipcMain.handle(IPC.patchGlobal, (_e, patch: Partial<GlobalConfig>) => guard(() => this.patchGlobal(patch)));
-    ipcMain.handle(IPC.setOverlay, (_e, on: boolean) => guard(() => this.accounts.setOverlay(on)));
-    ipcMain.handle(IPC.clearActivity, () => guard(() => { this.activity = []; this.scheduleState(); }));
+    invoke(IPC.patchUi, RendererSchemas.patchUi, (_e, patch: Partial<UiConfig>) => guard(() => this.patchUi(patch)));
+    invoke(IPC.patchGlobal, RendererSchemas.patchGlobal, (_e, patch: Partial<GlobalConfig>) => guard(() => this.patchGlobal(patch)));
+    invoke(IPC.setOverlay, RendererSchemas.setOverlay, (_e, on) => guard(() => this.accounts.setOverlay(on)));
+    invoke(IPC.clearActivity, RendererSchemas.clearActivity, () => guard(() => { this.activity = []; this.scheduleState(); }));
 
-    // observe-only events from account views
-    ipcMain.on(IPC.obMetrics, (_e, p: { accountId: string; unread: number; mentions: number }) => {
+    // observe-only events from account views (least-trusted surface)
+    on(IPC.obMetrics, ObserverSchemas.obMetrics, (_e, p) => {
       this.onRuntime(p.accountId, { unread: p.unread, mentions: p.mentions });
     });
-    ipcMain.on(IPC.obConnection, (_e, p: { accountId: string; state: ConnectionState }) => {
-      this.accounts.setConnection(p.accountId, p.state);
+    on(IPC.obConnection, ObserverSchemas.obConnection, (_e, p) => {
+      this.accounts.setConnection(p.accountId, p.state as ConnectionState);
     });
-    ipcMain.on(IPC.obNotification, (_e, p: ObserverNotification) => this.router.handle(p));
+    on(IPC.obNotification, ObserverSchemas.obNotification, (_e, p) => this.router.handle(p as ObserverNotification));
   }
 
   // ---- background timers (resource + security) ---------------------------
