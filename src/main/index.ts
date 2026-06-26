@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, IpcMainInvokeEvent, IpcMainEvent, Menu, net, powerMonitor, protocol, session } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, IpcMainInvokeEvent, IpcMainEvent, Menu, net, powerMonitor, protocol, session } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
@@ -35,6 +35,7 @@ class AppController {
   private isQuitting = false;
   private stateTimer: NodeJS.Timeout | null = null;
   private pushToTalkPressed = false;
+  private pendingSourcePick: ((id: string | null) => void) | null = null;
   private pushToTalkHook = new PushToTalkHook((pressed) => {
     this.setPushToTalkPressed(pressed, true);
   });
@@ -56,6 +57,7 @@ class AppController {
       this.cfg,
       (id, patch) => this.onRuntime(id, patch),
       (input) => this.onPushToTalkInput(input),
+      () => this.chooseDesktopSource(),
     );
     this.plugins = new PluginManager(
       path.join(__dirname, '../preload/plugin-host.js'),
@@ -83,13 +85,6 @@ class AppController {
     }
     this.registerIpc();
     this.startTimers();
-
-    // Diagnostic: confirm hardware video decode is available (black/absent call
-    // streams are usually a decode/GPU problem). Logged once at startup.
-    try {
-      const gpu = app.getGPUFeatureStatus() as unknown as Record<string, string>;
-      console.log('[gpu] video_decode:', gpu.video_decode, '| gpu_compositing:', gpu.gpu_compositing);
-    } catch { /* not available */ }
 
     registerHotkeys({
       nextAccount: () => this.cycle(1),
@@ -296,6 +291,40 @@ class AppController {
   showWindow() {
     if (!this.win.isVisible()) this.win.show();
     this.win.focus();
+  }
+
+  /**
+   * Screen-share source picker. Enumerates screens + windows and asks the
+   * renderer to show a chooser (over a hidden Discord view), then resolves with
+   * the picked source — or null if cancelled.
+   */
+  private async chooseDesktopSource(): Promise<Electron.DesktopCapturerSource | null> {
+    let sources: Electron.DesktopCapturerSource[];
+    try {
+      sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 320, height: 180 },
+        fetchWindowIcons: true,
+      });
+    } catch {
+      return null;
+    }
+    const payload = sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      type: s.id.startsWith('screen:') ? 'screen' : 'window',
+      thumbnail: s.thumbnail.toDataURL(),
+      appIcon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null,
+    }));
+    this.showWindow();
+    // Resolve any previous pending pick (shouldn't normally happen) as cancelled.
+    this.pendingSourcePick?.(null);
+    const id = await new Promise<string | null>((resolve) => {
+      this.pendingSourcePick = resolve;
+      this.win.webContents.send(IPC.showSourcePicker, { sources: payload });
+    });
+    this.pendingSourcePick = null;
+    return sources.find((s) => s.id === id) ?? null;
   }
 
   private snoozeAccount(id: string, until: number | null) {
@@ -559,6 +588,7 @@ class AppController {
 
     invoke(IPC.snooze, RendererSchemas.snooze, (_e, id, until) => guard(() => this.snoozeAccount(id, until)));
     invoke(IPC.showAccountMenu, RendererSchemas.showAccountMenu, (_e, id) => guard(() => this.showAccountMenu(id)));
+    invoke(IPC.pickSource, RendererSchemas.pickSource, (_e, id) => { this.pendingSourcePick?.(id); this.pendingSourcePick = null; return { ok: true }; });
 
     invoke(IPC.patchUi, RendererSchemas.patchUi, (_e, patch: Partial<UiConfig>) => guard(() => this.patchUi(patch)));
     invoke(IPC.patchGlobal, RendererSchemas.patchGlobal, (_e, patch: GlobalPatch) => guard(() => this.patchGlobal(patch)));
