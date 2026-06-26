@@ -9,6 +9,7 @@ import { AccountManager } from './accounts';
 import { NotificationRouter, ObserverNotification } from './notifications';
 import { AppTray } from './tray';
 import { registerHotkeys, unregisterHotkeys } from './hotkeys';
+import { initUpdater } from './updater';
 import { IPC } from '../shared/ipc';
 import { AccountPatch, AccountRuntime, ActivityEntry, AppState, ConnectionState, GlobalConfig, UiConfig } from '../shared/types';
 
@@ -368,6 +369,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => controller.showWindow());
   app.whenReady().then(() => {
     controller.start();
+    initUpdater();
     app.on('activate', () => controller.showWindow());
   });
   app.on('before-quit', () => controller.shutdown());
