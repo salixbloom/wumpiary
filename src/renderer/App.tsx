@@ -3,12 +3,14 @@ import { api, useStore } from './store';
 import { Sidebar } from './Sidebar';
 import { LockScreen } from './LockScreen';
 import { Settings, SettingsTab } from './Settings';
+import type { ShareSource } from '../shared/types';
 
 export function App() {
   const state = useStore((s) => s.state);
   const [tab, setTab] = useState<SettingsTab | null>(null);
   const [settingsAccount, setSettingsAccount] = useState<string | null>(null);
   const [autofillId, setAutofillId] = useState<string | null>(null);
+  const [shareSources, setShareSources] = useState<ShareSource[] | null>(null);
   const [themeFade, setThemeFade] = useState<{ id: number; vars: ShellVars } | null>(null);
   const lastShellVars = useRef<ShellVars | null>(null);
   const themeFadeTimer = useRef<number | null>(null);
@@ -19,6 +21,9 @@ export function App() {
 
   // Native account context menu (main process) asks us to open Settings → Account.
   useEffect(() => api.onOpenAccountSettings(({ accountId }) => { setSettingsAccount(accountId); setTab('account'); }), []);
+
+  // Screen-share: main asks us to show the screen/window picker for Go Live.
+  useEffect(() => api.onShowSourcePicker(({ sources }) => setShareSources(sources)), []);
 
   useEffect(() => {
     if (!state) return;
@@ -56,8 +61,8 @@ export function App() {
 
   // Hide the native account views whenever a full-window modal is open.
   useEffect(() => {
-    api.setOverlay(tab !== null || autofillId !== null);
-  }, [tab, autofillId]);
+    api.setOverlay(tab !== null || autofillId !== null || shareSources !== null);
+  }, [tab, autofillId, shareSources]);
 
   if (!state) return <AppFrame themeFade={themeFade}><div className="loading">Loading...</div></AppFrame>;
   if (state.locked) return <AppFrame themeFade={themeFade}><LockScreen hasVault={state.hasVault} encryptionAvailable={state.encryptionAvailable} /></AppFrame>;
@@ -92,6 +97,12 @@ export function App() {
             nickname={state.config.accounts[autofillId].nickname}
             accountId={autofillId}
             onClose={() => setAutofillId(null)}
+          />
+        )}
+        {shareSources && (
+          <SourcePicker
+            sources={shareSources}
+            onPick={(id) => { api.pickSource(id); setShareSources(null); }}
           />
         )}
       </div>
@@ -246,6 +257,44 @@ function AutofillModal({ nickname, accountId, onClose }: { nickname: string; acc
         </div>
       </form>
     </div>
+  );
+}
+
+function SourcePicker({ sources, onPick }: { sources: ShareSource[]; onPick: (id: string | null) => void }) {
+  const screens = sources.filter((s) => s.type === 'screen');
+  const windows = sources.filter((s) => s.type === 'window');
+  return (
+    <div className="modal-backdrop" onMouseDown={() => onPick(null)}>
+      <div className="share-picker" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="share-head">
+          <h3>Share your screen</h3>
+          <button className="modal-close" onClick={() => onPick(null)}>Cancel ✕</button>
+        </div>
+        <div className="share-body">
+          {screens.length > 0 && <div className="share-group">Screens</div>}
+          <div className="share-grid">
+            {screens.map((s) => <SourceTile key={s.id} source={s} onPick={onPick} />)}
+          </div>
+          {windows.length > 0 && <div className="share-group">Applications</div>}
+          <div className="share-grid">
+            {windows.map((s) => <SourceTile key={s.id} source={s} onPick={onPick} />)}
+          </div>
+          {sources.length === 0 && <p className="note">No screens or windows available to share.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SourceTile({ source, onPick }: { source: ShareSource; onPick: (id: string | null) => void }) {
+  return (
+    <button className="share-tile" onClick={() => onPick(source.id)} title={source.name}>
+      <img className="share-thumb" src={source.thumbnail} alt="" />
+      <div className="share-name">
+        {source.appIcon && <img className="share-icon" src={source.appIcon} alt="" />}
+        <span>{source.name}</span>
+      </div>
+    </button>
   );
 }
 

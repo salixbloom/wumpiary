@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc';
-import type { AccountPatch, AppState, GlobalPatch, UiConfig } from '../shared/types';
+import type { AccountPatch, AppState, GlobalPatch, ShareSource, UiConfig } from '../shared/types';
 import type { PluginPermission } from '../shared/plugins';
 
 export interface UnlockResult {
@@ -27,6 +27,7 @@ const api = {
   updateAccount: (id: string, patch: AccountPatch) => ipcRenderer.invoke(IPC.updateAccount, id, patch),
   snooze: (id: string, until: number | null) => ipcRenderer.invoke(IPC.snooze, id, until),
   showAccountMenu: (id: string) => ipcRenderer.invoke(IPC.showAccountMenu, id),
+  pickSource: (id: string | null) => ipcRenderer.invoke(IPC.pickSource, id),
 
   patchUi: (patch: Partial<UiConfig>) => ipcRenderer.invoke(IPC.patchUi, patch),
   patchGlobal: (patch: GlobalPatch) => ipcRenderer.invoke(IPC.patchGlobal, patch),
@@ -70,6 +71,11 @@ const api = {
     const l = (_e: unknown, p: { accountId: string }) => cb(p);
     ipcRenderer.on(IPC.openAccountSettings, l);
     return () => ipcRenderer.removeListener(IPC.openAccountSettings, l);
+  },
+  onShowSourcePicker: (cb: (p: { sources: ShareSource[] }) => void): (() => void) => {
+    const l = (_e: unknown, p: { sources: ShareSource[] }) => cb(p);
+    ipcRenderer.on(IPC.showSourcePicker, l);
+    return () => ipcRenderer.removeListener(IPC.showSourcePicker, l);
   },
 };
 

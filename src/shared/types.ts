@@ -104,6 +104,15 @@ export interface AccountRuntime {
   connection: ConnectionState;
 }
 
+/** A screen or window offered in the screen-share picker. */
+export interface ShareSource {
+  id: string;
+  name: string;
+  type: 'screen' | 'window';
+  thumbnail: string; // data URL
+  appIcon: string | null; // data URL
+}
+
 export interface ActivityEntry {
   id: string;
   accountId: string;

@@ -19,6 +19,7 @@ export const IPC = {
   updateAccount: 'accounts:update',
   snooze: 'accounts:snooze',
   showAccountMenu: 'accounts:showMenu', // pop the native per-account right-click menu
+  pickSource: 'screenshare:pickSource', // renderer -> main: chosen screen/window for Go Live (null = cancel)
   patchUi: 'settings:patchUi',
   patchGlobal: 'settings:patchGlobal',
   setOverlay: 'ui:setOverlay', // hide account views while a full-window modal is open
@@ -45,6 +46,7 @@ export const IPC = {
   playSound: 'app:playSound',
   promptAutofill: 'app:promptAutofill', // ask the renderer to open the autofill PIN modal
   openAccountSettings: 'app:openAccountSettings', // native menu -> renderer: open Settings on an account
+  showSourcePicker: 'app:showSourcePicker', // main -> renderer: choose a screen/window to share
 
   // account-observer preload <-> main
   obMetrics: 'observer:metrics',

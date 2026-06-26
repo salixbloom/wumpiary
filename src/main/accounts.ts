@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, WebContentsView, session, shell } from 'electron';
+import { app, BrowserWindow, WebContentsView, session, shell } from 'electron';
 import { randomUUID } from 'crypto';
 import { ConfigStore } from './config';
 import { IPC } from '../shared/ipc';
@@ -53,6 +53,7 @@ export class AccountManager {
     private cfg: ConfigStore,
     private onRuntime: (id: string, patch: Partial<AccountRuntime>) => void,
     private onInput?: (input: { type?: string; code?: string; control?: boolean; alt?: boolean; shift?: boolean; meta?: boolean }) => void,
+    private onChooseDesktopSource?: () => Promise<Electron.DesktopCapturerSource | null>,
   ) {}
 
   /** Recreate connected views on launch (crash/restart recovery). */
@@ -84,19 +85,23 @@ export class AccountManager {
     });
     const wc = view.webContents;
     const ses = ses_for(acc.partition);
-    // Present as a plain Chrome browser (strip the app + Electron tokens) so
-    // Discord serves its full voice/video/streaming experience instead of
-    // degrading for an unrecognized client (which hides "watch stream").
-    ses.setUserAgent(cleanUserAgent());
+    // Present as a plain Chrome browser (strip the Electron + app tokens) so
+    // Discord serves its WEB streaming path — watching streams and screen share
+    // work over pure WebRTC with no native module. Identifying as the desktop
+    // app instead makes Discord demand the (absent) DiscordNative and break the
+    // whole stream UI. Set on both the session and webContents.
+    const ua = browserUserAgent();
+    ses.setUserAgent(ua);
+    wc.setUserAgent(ua);
     if (acc.proxy) ses.setProxy({ proxyRules: acc.proxy }).catch(() => undefined);
     ses.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'fullscreen'));
     // Enable "Go Live" / screen sharing: without a display-media handler Chromium
-    // rejects getDisplayMedia. Pick the primary screen source (Electron 31 has no
-    // native system picker; that arrived in a later major).
+    // rejects getDisplayMedia. Ask the user to choose a screen or window (Electron
+    // 31 has no native system picker), then hand the chosen source back.
     ses.setDisplayMediaRequestHandler((_request, callback) => {
-      desktopCapturer
-        .getSources({ types: ['screen', 'window'] })
-        .then((sources) => callback(sources[0] ? { video: sources[0] } : {}))
+      const choose = this.onChooseDesktopSource ?? (() => Promise.resolve(null));
+      choose()
+        .then((source) => callback(source ? { video: source } : {}))
         .catch(() => callback({}));
     });
 
@@ -349,11 +354,14 @@ function ses_for(partition: string) {
   return session.fromPartition(partition);
 }
 
-/** A browser-grade User-Agent: Electron's default minus the app & Electron tokens. */
-function cleanUserAgent(): string {
-  const appName = app.getName();
+/**
+ * Electron's default UA with the app token and the `Electron/x` token removed,
+ * leaving a clean Chrome browser UA so Discord serves its web streaming path.
+ */
+function browserUserAgent(): string {
+  const escaped = app.getName().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return app.userAgentFallback
-    .replace(new RegExp(`\\s*${appName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/[^\\s]+`, 'i'), '')
+    .replace(new RegExp(`\\s*${escaped}\\/[^\\s]+`, 'i'), '')
     .replace(/\s*Electron\/[^\s]+/i, '')
     .replace(/\s{2,}/g, ' ')
     .trim();

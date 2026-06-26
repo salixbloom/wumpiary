@@ -28,6 +28,34 @@ const INJECT = `(() => {
   if (window.__wumpInstalled) return; window.__wumpInstalled = true;
   const post = (m) => { try { window.postMessage(m, '*'); } catch (e) {} };
 
+  // Hide Electron from Client Hints (navigator.userAgentData) so Discord treats
+  // this as a plain Chrome browser and serves its web streaming path (watch /
+  // screen share over WebRTC, no native module). Runs before Discord's scripts.
+  try {
+    const uad = navigator.userAgentData;
+    if (uad) {
+      const clean = (list) => (list || []).filter((b) => !/electron|wumpiary|discord/i.test((b && b.brand) || ''));
+      const brands = clean(uad.brands);
+      const origHEV = uad.getHighEntropyValues ? uad.getHighEntropyValues.bind(uad) : null;
+      const fake = {
+        brands: brands,
+        mobile: false,
+        platform: uad.platform,
+        toJSON: () => ({ brands: brands, mobile: false, platform: uad.platform }),
+        getHighEntropyValues: (hints) => {
+          if (!origHEV) return Promise.resolve({ brands: brands, mobile: false, platform: uad.platform });
+          return origHEV(hints).then((r) => {
+            if (r && r.brands) r.brands = clean(r.brands);
+            if (r && r.fullVersionList) r.fullVersionList = clean(r.fullVersionList);
+            if (r && r.uaFullVersion) r.uaFullVersion = (r.uaFullVersion + '').replace(/electron.*/i, '');
+            return r;
+          });
+        },
+      };
+      Object.defineProperty(Navigator.prototype, 'userAgentData', { configurable: true, get: () => fake });
+    }
+  } catch (e) {}
+
   // When the user picks a custom chime, wumpiary plays it and we mute Discord's
   // OWN notification ding so it isn't heard twice. We can't match Discord's
   // hashed sound-file names, so instead we briefly block short <audio> URL
@@ -40,7 +68,8 @@ const INJECT = `(() => {
     const origPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
       try {
-        if (Date.now() < suppressSoundUntil && !this.srcObject && this.src) return Promise.resolve();
+        // Audio elements only — never touch <video> (stream/call video).
+        if (Date.now() < suppressSoundUntil && (this instanceof HTMLAudioElement) && !this.srcObject && this.src) return Promise.resolve();
       } catch (e) {}
       return origPlay.apply(this, arguments);
     };
