@@ -1,6 +1,6 @@
 {
   "name": "wumpiary",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Multi-account Discord wrapper — keep every account connected, notified, and isolated.",
   "author": "Willow Bloom <salixbloom@users.noreply.github.com>",

@@ -14,6 +14,7 @@ It loads the genuine Discord web client and **observes only** — it never autom
 - **Security** — PIN-gated encrypted vault (scrypt + AES-256-GCM, bound to the OS keychain where available), auto-lock on idle.
 - **Resource controls** — only the active account is rendered; others stay connected but un-rendered. Opt-in / auto hibernation reclaims an account's RAM (it then stops notifying).
 - **Conveniences** — global DND, tray with aggregate mention badge + quick switch, global hotkeys, themes, activity log, launch-at-login, crash/session recovery.
+- **Plugins** — sandboxed, permission-gated plugins that extend wumpiary's own shell (events, notifications, cosmetic Discord CSS) without ever running code inside Discord. See [PLUGINS.md](PLUGINS.md).
 
 ## Resource & stability model
 
@@ -31,6 +32,11 @@ npm run dev        # electron-vite dev server with HMR
 npm run build      # production build into out/
 npm start          # preview the production build
 npm run typecheck  # tsc --noEmit
+
+npm run package:linux   # build a distributable (AppImage + deb) into dist/
+npm run package:win     # NSIS installer
+npm run package:mac     # dmg
+npm run package:dir     # unpacked app only (fast, no installer)
 ```
 
 > On a headless Linux box you can launch with `xvfb-run -a electron .` after `npm run build`, but the app is intended to be driven on a real desktop.
@@ -47,4 +53,4 @@ src/
 
 ## Status
 
-First implementation (`v0.1.0`). Built and type-checked; intended for live testing on a real desktop. Automated tests are deferred — see PLAN.md §16 for the planned strategy.
+`v0.2.0` — feature-complete MVP: built, type-checked, IPC-validated, and packageable for Win/macOS/Linux. Intended for live testing on a real desktop. Automated tests are deferred — see PLAN.md §16 for the planned strategy, and [CHANGELOG.md](CHANGELOG.md) for release history.
