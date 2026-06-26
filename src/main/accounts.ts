@@ -2,6 +2,7 @@ import { app, BrowserWindow, desktopCapturer, WebContentsView, session, shell } 
 import { randomUUID } from 'crypto';
 import { ConfigStore } from './config';
 import { IPC } from '../shared/ipc';
+import { isCustomSound } from './notifications';
 import { AccountRuntime, ConnectionState, defaultAccountColors, newAccountConfig } from '../shared/types';
 
 const DISCORD_URL = 'https://discord.com/app';
@@ -110,6 +111,7 @@ export class AccountManager {
       this.applyCssTo(id);
       wc.insertCSS(PTT_HELD_CSS).catch(() => undefined); // static; cleared with the page on next nav
       this.sendPushToTalkState(view);
+      this.sendSoundConfig(view, id);
     });
     wc.on('before-input-event', (_e, input) => this.onInput?.(input));
 
@@ -279,6 +281,20 @@ export class AccountManager {
 
   private sendPushToTalkState(view: WebContentsView) {
     if (!view.webContents.isDestroyed()) view.webContents.send(IPC.obPushToTalk, { enabled: this.pttEnabled, pressed: this.pttPressed });
+  }
+
+  private sendSoundConfig(view: WebContentsView, id: string) {
+    const acc = this.cfg.get().accounts[id];
+    if (!acc || view.webContents.isDestroyed()) return;
+    // Mute Discord's own ding only when this account uses a custom chime.
+    const muteNotifSound = isCustomSound(acc.notifications.chime);
+    view.webContents.send(IPC.obSoundConfig, { muteNotifSound });
+  }
+
+  /** Re-push the sound config to a view (call when the account's chime changes). */
+  refreshSoundConfig(id: string) {
+    const view = this.views.get(id);
+    if (view) this.sendSoundConfig(view, id);
   }
 
   openDevtools(id: string) {
