@@ -103,6 +103,7 @@ export const RendererSchemas = {
   reorder: z.tuple([z.array(AccountId).max(256)]),
   updateAccount: z.tuple([AccountId, AccountPatch]),
   snooze: z.tuple([AccountId, z.number().int().nonnegative().nullable()]),
+  showAccountMenu: z.tuple([AccountId]),
   patchUi: z.tuple([UiPatch]),
   patchGlobal: z.tuple([GlobalPatch]),
   setOverlay: z.tuple([z.boolean()]),

@@ -1,7 +1,21 @@
-import { Notification } from 'electron';
+import { Notification, nativeImage } from 'electron';
 import { randomUUID } from 'crypto';
 import { ConfigStore } from './config';
-import { ActivityEntry, NotificationFilter, NotifKind } from '../shared/types';
+import { AccountConfig, ActivityEntry, NotificationFilter, NotifKind } from '../shared/types';
+
+/** Build a toast icon from an account's custom avatar (file path or data URL). */
+function accountIcon(acc: AccountConfig) {
+  const src = acc.avatarOverride;
+  if (!src) return undefined;
+  try {
+    const img = src.startsWith('data:')
+      ? nativeImage.createFromDataURL(src)
+      : nativeImage.createFromPath(src.replace(/^file:\/\//, ''));
+    return img.isEmpty() ? undefined : img;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface ObserverNotification {
   accountId: string;
@@ -72,6 +86,7 @@ export class NotificationRouter {
     const notif = new Notification({
       title: `${acc.nickname} — ${p.title}`,
       body: hide ? (p.kind === 'call' ? 'Incoming call' : 'New message') : p.body,
+      icon: accountIcon(acc), // show which account it came from
       silent: true, // we drive sound ourselves via per-account chimes
     });
     notif.on('click', () => this.onActivate(p.accountId));

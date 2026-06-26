@@ -1,4 +1,4 @@
-import { BrowserWindow, WebContentsView, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, WebContentsView, session, shell } from 'electron';
 import { randomUUID } from 'crypto';
 import { ConfigStore } from './config';
 import { IPC } from '../shared/ipc';
@@ -7,6 +7,23 @@ import { AccountRuntime, ConnectionState, defaultAccountColors, newAccountConfig
 const DISCORD_URL = 'https://discord.com/app';
 const DISCORD_LOGIN_URL = 'https://discord.com/login';
 const TITLE_BAR_HEIGHT = 34;
+
+// Cosmetic CSS injected into every Discord view to show, with a green ring around
+// your own avatar, that you're currently holding the push-to-talk key. The class
+// `wump-ptt-held` is toggled on <html> by the observer (account-observer.ts) from
+// PTT state. Selectors target Discord's (hashed) classnames best-effort — they
+// hit the bottom-left user panel avatar and the voice-connected widget avatar
+// (both are *your* avatar) and override Discord's voice-activity speaking ring.
+// Update the selectors here if Discord changes its markup.
+const PTT_HELD_CSS = `
+html.wump-ptt-held [class*="panels_"] [class*="avatar_"],
+html.wump-ptt-held [class*="avatarWrapper_"] [class*="avatar_"],
+html.wump-ptt-held [class*="container_"] > [class*="avatar_"] {
+  box-shadow: 0 0 0 2px #23a559, 0 0 9px 1px rgba(35, 165, 89, 0.75) !important;
+  border-radius: 50% !important;
+  transition: box-shadow 0.08s ease;
+}
+`;
 
 /**
  * Owns one isolated WebContentsView per account and applies the resource &
@@ -60,13 +77,27 @@ export class AccountManager {
         contextIsolation: true,
         sandbox: true,
         spellcheck: true,
+        autoplayPolicy: 'no-user-gesture-required', // let incoming call/stream video autoplay
         additionalArguments: [`--acct=${id}`, `--ptt-enabled=${this.cfg.get().global.pushToTalk.enabled ? '1' : '0'}`],
       },
     });
     const wc = view.webContents;
     const ses = ses_for(acc.partition);
+    // Present as a plain Chrome browser (strip the app + Electron tokens) so
+    // Discord serves its full voice/video/streaming experience instead of
+    // degrading for an unrecognized client (which hides "watch stream").
+    ses.setUserAgent(cleanUserAgent());
     if (acc.proxy) ses.setProxy({ proxyRules: acc.proxy }).catch(() => undefined);
     ses.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'fullscreen'));
+    // Enable "Go Live" / screen sharing: without a display-media handler Chromium
+    // rejects getDisplayMedia. Pick the primary screen source (Electron 31 has no
+    // native system picker; that arrived in a later major).
+    ses.setDisplayMediaRequestHandler((_request, callback) => {
+      desktopCapturer
+        .getSources({ types: ['screen', 'window'] })
+        .then((sources) => callback(sources[0] ? { video: sources[0] } : {}))
+        .catch(() => callback({}));
+    });
 
     // Open external links in the system browser, not inside the account view.
     wc.setWindowOpenHandler(({ url }) => {
@@ -74,9 +105,10 @@ export class AccountManager {
       return { action: 'deny' };
     });
 
-    // Re-apply plugin CSS after every navigation (insertCSS is cleared on load).
+    // Re-apply injected CSS after every navigation (insertCSS is cleared on load).
     wc.on('dom-ready', () => {
       this.applyCssTo(id);
+      wc.insertCSS(PTT_HELD_CSS).catch(() => undefined); // static; cleared with the page on next nav
       this.sendPushToTalkState(view);
     });
     wc.on('before-input-event', (_e, input) => this.onInput?.(input));
@@ -299,4 +331,14 @@ export class AccountManager {
 
 function ses_for(partition: string) {
   return session.fromPartition(partition);
+}
+
+/** A browser-grade User-Agent: Electron's default minus the app & Electron tokens. */
+function cleanUserAgent(): string {
+  const appName = app.getName();
+  return app.userAgentFallback
+    .replace(new RegExp(`\\s*${appName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/[^\\s]+`, 'i'), '')
+    .replace(/\s*Electron\/[^\s]+/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }

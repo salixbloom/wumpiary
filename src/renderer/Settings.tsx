@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from './store';
-import type { AppState, NotificationFilter, CallPolicy, Theme, GlobalConfig } from '../shared/types';
+import type { AppState, NotificationFilter, CallPolicy, Theme, GlobalConfig, AccountConfig } from '../shared/types';
 import { PERMISSION_LABELS } from '../shared/plugins';
 
 export type SettingsTab = 'general' | 'account' | 'activity' | 'plugins' | 'about';
@@ -329,22 +329,32 @@ function SavedLogin({ accountId, saved }: { accountId: string; saved?: { email: 
   );
 }
 
+function ActAvatar({ account, nickname }: { account?: AccountConfig; nickname: string }) {
+  if (account?.avatarOverride) {
+    const src = account.avatarOverride.startsWith('file:') ? account.avatarOverride : `file://${account.avatarOverride}`;
+    return <img className="act-avatar" src={src} alt={nickname} />;
+  }
+  const initials = (account?.nickname ?? nickname).trim().slice(0, 2).toUpperCase() || '??';
+  return <span className="act-avatar" style={{ background: account?.color ?? 'var(--grey)' }}>{initials}</span>;
+}
+
 function Activity({ state }: { state: AppState }) {
   return (
     <section>
       <div className="row">
-        <h3>Recent notifications</h3>
+        <h3>Inbox — notifications from all accounts</h3>
         <button onClick={() => api.clearActivity()}>Clear</button>
       </div>
       {state.activity.length === 0 && <p className="note">Nothing yet.</p>}
       <ul className="activity">
         {state.activity.map((a) => (
           <li key={a.id}>
+            <ActAvatar account={state.config.accounts[a.accountId]} nickname={a.nickname} />
             <span className="act-acct">{a.nickname}</span>
             <span className={`act-kind ${a.kind}`}>{a.kind}</span>
             <span className="act-title">{a.title}</span>
-            <span className="act-body">{a.body}</span>
             <span className="act-time">{new Date(a.at).toLocaleTimeString()}</span>
+            <span className="act-body">{a.body}</span>
           </li>
         ))}
       </ul>
