@@ -20,6 +20,9 @@ export class AccountManager {
   readonly lastActive = new Map<string, number>();
   private overlay = false;
   activeId: string | null = null;
+  /** Combined cosmetic CSS contributed by plugins (discord-css permission). */
+  private pluginCss = '';
+  private cssKeys = new Map<string, string>(); // viewId -> insertCSS handle
 
   constructor(
     private win: BrowserWindow,
@@ -64,6 +67,9 @@ export class AccountManager {
       if (url.startsWith('http')) shell.openExternal(url);
       return { action: 'deny' };
     });
+
+    // Re-apply plugin CSS after every navigation (insertCSS is cleared on load).
+    wc.on('dom-ready', () => this.applyCssTo(id));
 
     wc.on('did-start-loading', () => this.onRuntime(id, { connection: 'loading' }));
     wc.on('did-fail-load', (_e, code) => {
@@ -227,6 +233,21 @@ export class AccountManager {
 
   hasView(id: string): boolean {
     return this.views.has(id);
+  }
+
+  /** Set the combined plugin CSS and (re)apply it to every live account view. */
+  setPluginCss(css: string) {
+    this.pluginCss = css;
+    for (const id of this.views.keys()) this.applyCssTo(id);
+  }
+
+  private applyCssTo(id: string) {
+    const view = this.views.get(id);
+    if (!view || view.webContents.isDestroyed()) return;
+    const wc = view.webContents;
+    const prev = this.cssKeys.get(id);
+    if (prev) { wc.removeInsertedCSS(prev).catch(() => undefined); this.cssKeys.delete(id); }
+    if (this.pluginCss) wc.insertCSS(this.pluginCss).then((key) => this.cssKeys.set(id, key)).catch(() => undefined);
   }
 
   setConnection(id: string, state: ConnectionState) {

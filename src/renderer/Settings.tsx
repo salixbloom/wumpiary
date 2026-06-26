@@ -1,8 +1,9 @@
 import React from 'react';
 import { api } from './store';
 import type { AppState, NotificationFilter, CallPolicy, Theme } from '../shared/types';
+import { PERMISSION_LABELS } from '../shared/plugins';
 
-export type SettingsTab = 'general' | 'account' | 'activity' | 'about';
+export type SettingsTab = 'general' | 'account' | 'activity' | 'plugins' | 'about';
 
 interface Props {
   state: AppState;
@@ -19,7 +20,7 @@ export function Settings({ state, tab, accountId, onTab, onSelectAccount, onClos
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <nav className="modal-nav">
           <div className="modal-title">Settings</div>
-          {(['general', 'account', 'activity', 'about'] as SettingsTab[]).map((t) => (
+          {(['general', 'account', 'activity', 'plugins', 'about'] as SettingsTab[]).map((t) => (
             <button key={t} className={tab === t ? 'active' : ''} onClick={() => onTab(t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
@@ -30,6 +31,7 @@ export function Settings({ state, tab, accountId, onTab, onSelectAccount, onClos
           {tab === 'general' && <General state={state} />}
           {tab === 'account' && <AccountSettings state={state} accountId={accountId} onSelectAccount={onSelectAccount} />}
           {tab === 'activity' && <Activity state={state} />}
+          {tab === 'plugins' && <Plugins state={state} />}
           {tab === 'about' && <About />}
         </div>
       </div>
@@ -193,6 +195,58 @@ function Activity({ state }: { state: AppState }) {
             <span className="act-title">{a.title}</span>
             <span className="act-body">{a.body}</span>
             <span className="act-time">{new Date(a.at).toLocaleTimeString()}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Plugins({ state }: { state: AppState }) {
+  const plugins = state.plugins ?? [];
+  return (
+    <section>
+      <div className="row">
+        <h3>Plugins</h3>
+        <span>
+          <button onClick={() => api.openPluginsFolder()}>Open folder</button>{' '}
+          <button onClick={() => api.reloadPlugins()}>Reload</button>
+        </span>
+      </div>
+      <p className="note">
+        Plugins extend wumpiary's own shell — they run sandboxed (no network, no file access) and can never run code inside Discord.
+        Drop a plugin folder into the plugins directory, then reload. Only enable plugins you trust; grant each permission deliberately.
+      </p>
+      {plugins.length === 0 && <p className="note">No plugins installed.</p>}
+      <ul className="plugins">
+        {plugins.map((p) => (
+          <li key={p.id} className={`plugin ${p.error ? 'has-error' : ''}`}>
+            <div className="plugin-head">
+              <div className="plugin-id">
+                <span className="plugin-name">{p.name}</span>
+                <span className="plugin-version">v{p.version}</span>
+                {p.author && <span className="plugin-author">by {p.author}</span>}
+              </div>
+              <Toggle on={p.enabled} onChange={(v) => api.setPluginEnabled(p.id, v)} />
+            </div>
+            {p.description && <p className="plugin-desc">{p.description}</p>}
+            {p.error && <p className="plugin-error">⚠ {p.error}</p>}
+            {p.permissions.length > 0 && (
+              <div className="plugin-perms">
+                <small>Permissions</small>
+                {p.permissions.map((perm) => (
+                  <div key={perm.name} className="row perm-row">
+                    <div className="row-label">
+                      <span>{perm.name}</span>
+                      <small>{PERMISSION_LABELS[perm.name]}</small>
+                    </div>
+                    <div className="row-control">
+                      <Toggle on={perm.granted} onChange={(v) => api.setPluginPermission(p.id, perm.name, v)} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </li>
         ))}
       </ul>

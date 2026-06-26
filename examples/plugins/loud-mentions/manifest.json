@@ -1,0 +1,9 @@
+{
+  "id": "loud-mentions",
+  "name": "Loud Mentions",
+  "version": "1.0.0",
+  "description": "Posts an extra, unmissable notification (and tints the Discord view) whenever any account gets an @mention.",
+  "author": "wumpiary",
+  "entry": "index.js",
+  "permissions": ["notifications", "discord-css"]
+}
