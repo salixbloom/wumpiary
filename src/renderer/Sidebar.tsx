@@ -6,9 +6,10 @@ interface SidebarProps {
   state: AppState;
   onOpenSettings: () => void;
   onAccountSettings: (id: string) => void;
+  onAutofill: (id: string) => void;
 }
 
-export function Sidebar({ state, onOpenSettings, onAccountSettings }: SidebarProps) {
+export function Sidebar({ state, onOpenSettings, onAccountSettings, onAutofill }: SidebarProps) {
   const ui = state.config.ui;
   const collapsed = ui.sidebarCollapsed;
   const order = state.config.accountsOrder;
@@ -65,10 +66,13 @@ export function Sidebar({ state, onOpenSettings, onAccountSettings }: SidebarPro
       {menu && (
         <ContextMenu
           account={state.config.accounts[menu.id]}
+          signedOut={(state.runtime[menu.id]?.connection ?? 'offline') === 'signed-out'}
+          hasSavedPassword={!!state.savedLogins?.[menu.id]?.password}
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
           onSettings={() => onAccountSettings(menu.id)}
+          onAutofill={() => onAutofill(menu.id)}
         />
       )}
     </div>
@@ -141,13 +145,16 @@ function Avatar({ account }: { account: AccountConfig }) {
 }
 
 function ContextMenu({
-  account, x, y, onClose, onSettings,
+  account, signedOut, hasSavedPassword, x, y, onClose, onSettings, onAutofill,
 }: {
   account: AccountConfig;
+  signedOut: boolean;
+  hasSavedPassword: boolean;
   x: number;
   y: number;
   onClose: () => void;
   onSettings: () => void;
+  onAutofill: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -171,6 +178,12 @@ function ContextMenu({
   return (
     <div className="context-menu" ref={ref} style={{ left: x, top: y }}>
       <div className="cm-title">{account.nickname}</div>
+      {signedOut && hasSavedPassword && (
+        <>
+          <button className="cm-highlight" onClick={act(onAutofill)}>Autofill sign-in…</button>
+          <hr />
+        </>
+      )}
       <button onClick={act(() => api.updateAccount(account.id, { notifications: { muted: !account.notifications.muted } }))}>
         {account.notifications.muted ? 'Unmute notifications' : 'Mute notifications'}
       </button>
