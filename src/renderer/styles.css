@@ -52,7 +52,17 @@ input, select { font: inherit; }
 .loading { display: grid; place-items: center; height: 100%; color: var(--text-dim); }
 
 /* ---- layout ---- */
-.app-frame { height: 100%; display: flex; flex-direction: column; background: var(--app-frame-background); }
+.app-frame { height: 100%; display: flex; flex-direction: column; background: var(--app-frame-background); position: relative; overflow: hidden; }
+.theme-wipe {
+  position: fixed; inset: 0; z-index: 1000; pointer-events: none;
+  background: radial-gradient(circle at 0 100%, var(--wipe-color) 0%, var(--wipe-color) 62%, transparent 78%);
+  clip-path: circle(0 at 0 100%);
+  animation: theme-wipe 520ms cubic-bezier(.2, .8, .2, 1) forwards;
+}
+@keyframes theme-wipe {
+  from { clip-path: circle(0 at 0 100%); }
+  to { clip-path: circle(150vmax at 0 100%); }
+}
 .titlebar {
   height: var(--titlebar-height); flex-shrink: 0;
   display: flex; align-items: center; justify-content: space-between;
@@ -66,6 +76,10 @@ input, select { font: inherit; }
   width: 46px; height: 100%; display: grid; place-items: center;
   background: transparent; border: none; border-radius: 0; color: var(--shell-text, var(--text));
   font-size: 13px; line-height: 1;
+}
+.window-icon {
+  width: 14px; height: 14px; fill: none; stroke: currentColor;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
 }
 .window-controls button:hover { background: var(--shell-bg-hover, var(--bg-hover)); }
 .window-controls button.close:hover { background: var(--red); color: #fff; }
