@@ -553,6 +553,7 @@ class AppController {
         if (patch.calls) Object.assign(a.calls, patch.calls);
       });
       if (patch.proxy !== undefined) this.accounts.applyProxy(id);
+      if (patch.notifications?.chime !== undefined) this.accounts.refreshSoundConfig(id);
       this.scheduleState();
     }));
 

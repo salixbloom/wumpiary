@@ -83,16 +83,32 @@ export class NotificationRouter {
     }
 
     const hide = n.hidePreview || c.global.hidePreviews;
-    const notif = new Notification({
-      title: `${acc.nickname} — ${p.title}`,
-      body: hide ? (p.kind === 'call' ? 'Incoming call' : 'New message') : p.body,
-      icon: accountIcon(acc), // show which account it came from
-      silent: true, // we drive sound ourselves via per-account chimes
-    });
-    notif.on('click', () => this.onActivate(p.accountId));
-    notif.show();
+    try {
+      const notif = new Notification({
+        title: `${acc.nickname} — ${p.title}`,
+        body: hide ? (p.kind === 'call' ? 'Incoming call' : 'New message') : p.body,
+        icon: accountIcon(acc), // show which account it came from
+        silent: true, // we drive sound ourselves via per-account chimes
+      });
+      notif.on('click', () => this.onActivate(p.accountId));
+      notif.on('failed', (_e, err) => console.warn('[notif] show failed:', err));
+      notif.show();
+    } catch (e) {
+      console.error('[notif] error constructing/showing:', e);
+    }
     this.onShown({ accountId: p.accountId, nickname: acc.nickname, title: p.title, body: p.body, kind: p.kind });
 
-    if (!silent) this.playChime(p.accountId, p.kind === 'call' ? acc.calls.ringtone : n.chime);
+    // Sound policy:
+    //  - default sound: play nothing — Discord plays its own notification sound,
+    //    so a wumpiary chime would just double it up.
+    //  - custom sound: play our chime; the observer mutes Discord's own sound for
+    //    this account so only the custom chime is heard.
+    const sound = p.kind === 'call' ? acc.calls.ringtone : n.chime;
+    if (!silent && isCustomSound(sound)) this.playChime(p.accountId, sound);
   }
+}
+
+/** A user-overridden sound (not the built-in default and not 'none'/empty). */
+export function isCustomSound(sound: string): boolean {
+  return !!sound && sound !== 'default' && sound !== 'none';
 }

@@ -9,6 +9,7 @@ const IPC = {
   obConnection: 'observer:connection',
   obFill: 'observer:fill',
   obPushToTalk: 'observer:pushToTalk',
+  obSoundConfig: 'observer:soundConfig',
 } as const;
 
 // OBSERVE-ONLY bridge injected into each Discord account view. It never changes
@@ -27,6 +28,24 @@ const INJECT = `(() => {
   if (window.__wumpInstalled) return; window.__wumpInstalled = true;
   const post = (m) => { try { window.postMessage(m, '*'); } catch (e) {} };
 
+  // When the user picks a custom chime, wumpiary plays it and we mute Discord's
+  // OWN notification ding so it isn't heard twice. We can't match Discord's
+  // hashed sound-file names, so instead we briefly block short <audio> URL
+  // playback right after a notification fires. Voice (srcObject MediaStreams)
+  // and unrelated UI sounds are left untouched.
+  const soundCfg = { muteNotifSound: false };
+  let suppressSoundUntil = 0;
+  window.__wumpSetSoundConfig = (cfg) => { soundCfg.muteNotifSound = !!(cfg && cfg.muteNotifSound); };
+  try {
+    const origPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      try {
+        if (Date.now() < suppressSoundUntil && !this.srcObject && this.src) return Promise.resolve();
+      } catch (e) {}
+      return origPlay.apply(this, arguments);
+    };
+  } catch (e) {}
+
   // Capture (do not display) Discord's web notifications.
   try {
     const Orig = window.Notification;
@@ -37,6 +56,8 @@ const INJECT = `(() => {
     }
     function Wump(title, options) {
       const body = (options && options.body) || '';
+      // Open a short window to swallow Discord's own ding for this notification.
+      if (soundCfg.muteNotifSound) suppressSoundUntil = Date.now() + 1500;
       post({ __wump: 'notif', title: title || 'Discord', body: body, kind: classify(title, body) });
       return { close(){}, addEventListener(){}, removeEventListener(){}, onclick: null };
     }
@@ -270,6 +291,12 @@ ipcRenderer.on(IPC.obPushToTalk, (_e, p: { enabled: boolean; pressed: boolean })
       enabled: !!p.enabled,
       pressed: !!p.pressed,
     })})`,
+  ).catch(() => undefined);
+});
+
+ipcRenderer.on(IPC.obSoundConfig, (_e, p: { muteNotifSound: boolean }) => {
+  webFrame.executeJavaScript(
+    `window.__wumpSetSoundConfig && window.__wumpSetSoundConfig(${JSON.stringify({ muteNotifSound: !!p.muteNotifSound })})`,
   ).catch(() => undefined);
 });
 
