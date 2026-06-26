@@ -93,6 +93,8 @@ export interface AppState {
   totalMentions: number;
   encryptionAvailable: boolean;
   plugins: PluginInfo[];
+  /** Per-account saved-login presence, for the autofill UI. */
+  savedLogins: Record<string, { email: boolean; password: boolean }>;
 }
 
 export type AccountPatch = Partial<

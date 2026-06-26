@@ -175,7 +175,57 @@ function AccountSettings({ state, accountId, onSelectAccount }: { state: AppStat
       <Row label="Proxy" hint="e.g. socks5://host:port — for privacy, not ban evasion">
         <input placeholder="none" value={acc.proxy ?? ''} onChange={(e) => api.updateAccount(id, { proxy: e.target.value || null })} />
       </Row>
+
+      <h3>Saved login</h3>
+      <SavedLogin accountId={id} saved={state.savedLogins?.[id]} />
     </section>
+  );
+}
+
+function SavedLogin({ accountId, saved }: { accountId: string; saved?: { email: boolean; password: boolean } }) {
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [pin, setPin] = React.useState('');
+  const [msg, setMsg] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const save = async () => {
+    if (!pin || (!email && !password) || busy) return;
+    setBusy(true); setMsg(null);
+    const r = await api.saveLogin(accountId, email, password, pin);
+    setBusy(false);
+    setPassword(''); setPin('');
+    setMsg(r.ok ? 'Saved.' : 'Incorrect PIN — not saved.');
+  };
+  const clear = async () => { await api.clearLogin(accountId); setMsg('Cleared.'); };
+
+  return (
+    <>
+      <p className="note">
+        Optional. Lets you autofill the login when Discord signs this account out. Your email is kept in the encrypted vault;
+        your password is additionally encrypted under your PIN, so autofilling always re-asks for it. You still click Log In and
+        solve any captcha / 2FA yourself — nothing is submitted automatically.
+      </p>
+      <p className="note">
+        Currently saved: email {saved?.email ? '✓' : '—'}, password {saved?.password ? '✓' : '—'}.
+      </p>
+      <Row label="Email">
+        <input type="email" placeholder={saved?.email ? '•••• (saved)' : 'name@example.com'} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" />
+      </Row>
+      <Row label="Password" hint="encrypted under your PIN">
+        <input type="password" placeholder={saved?.password ? '•••• (saved)' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
+      </Row>
+      <Row label="Confirm PIN" hint="required to encrypt/save">
+        <input type="password" inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} autoComplete="off" />
+      </Row>
+      <div className="row">
+        {msg && <small className="note">{msg}</small>}
+        <span style={{ marginLeft: 'auto' }}>
+          {(saved?.email || saved?.password) && <button className="danger" onClick={clear}>Clear saved login</button>}{' '}
+          <button className="primary" onClick={save} disabled={!pin || (!email && !password) || busy}>{busy ? 'Saving…' : 'Save login'}</button>
+        </span>
+      </div>
+    </>
   );
 }
 

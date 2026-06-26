@@ -1,6 +1,7 @@
 import { BrowserWindow, WebContentsView, session, shell } from 'electron';
 import { randomUUID } from 'crypto';
 import { ConfigStore } from './config';
+import { IPC } from '../shared/ipc';
 import { AccountRuntime, ConnectionState, defaultAccountColors, newAccountConfig } from '../shared/types';
 
 const DISCORD_URL = 'https://discord.com/app';
@@ -207,6 +208,15 @@ export class AccountManager {
 
   reload(id: string) {
     this.views.get(id)?.webContents.reload();
+  }
+
+  /** Push login credentials to an account view's observer to autofill the form.
+   *  `password` is a Buffer owned by the caller (wiped by the caller after). */
+  fillLogin(id: string, email: string, password: Buffer | null): boolean {
+    const view = this.views.get(id);
+    if (!view || view.webContents.isDestroyed()) return false;
+    view.webContents.send(IPC.obFill, { email, password: password ? new Uint8Array(password) : null });
+    return true;
   }
 
   openDevtools(id: string) {

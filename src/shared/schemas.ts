@@ -93,6 +93,9 @@ export const RendererSchemas = {
   patchGlobal: z.tuple([GlobalPatch]),
   setOverlay: z.tuple([z.boolean()]),
   clearActivity: z.tuple([]),
+  saveLogin: z.tuple([AccountId, z.string().max(320), z.string().max(512), z.string().min(1).max(256)]), // accountId, email, password, pin
+  clearLogin: z.tuple([AccountId]),
+  autofillLogin: z.tuple([AccountId, z.string().min(1).max(256)]), // accountId, pin
   setPluginEnabled: z.tuple([z.string().max(64), z.boolean()]),
   setPluginPermission: z.tuple([z.string().max(64), z.enum(['accounts', 'notifications', 'discord-css']), z.boolean()]),
   reloadPlugins: z.tuple([]),

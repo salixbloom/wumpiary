@@ -206,3 +206,11 @@ button.primary:hover { filter: brightness(1.08); }
 .plugin-perms { margin-top: 10px; border-top: 1px solid var(--bg-hover); padding-top: 8px; }
 .plugin-perms > small { color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
 .perm-row { padding: 6px 0; }
+
+/* Autofill PIN modal */
+.pin-modal { background: var(--bg-3); border-radius: 10px; padding: 22px 24px; width: 360px; max-width: 90vw; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.5); }
+.pin-modal h3 { margin: 0; }
+.pin-modal input { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--bg-hover); background: var(--bg); color: var(--text); font: inherit; }
+.pin-error { color: var(--red); margin: 0; font-size: 13px; }
+.pin-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.cm-highlight { color: var(--accent); font-weight: 600; }

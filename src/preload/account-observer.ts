@@ -6,6 +6,7 @@ const IPC = {
   obMetrics: 'observer:metrics',
   obNotification: 'observer:notification',
   obConnection: 'observer:connection',
+  obFill: 'observer:fill',
 } as const;
 
 // OBSERVE-ONLY bridge injected into each Discord account view. It never changes
@@ -73,6 +74,39 @@ const INJECT = `(() => {
 })();`;
 
 webFrame.executeJavaScript(INJECT).catch(() => undefined);
+
+// ---- login autofill (user-initiated, PIN-gated upstream) -----------------
+// Filling the login form is the one place this preload writes to the page. It
+// runs entirely in THIS isolated world (never the page's main world, so Discord
+// scripts can't read the credentials) and only sets the standard email/password
+// inputs via the native value setter + an `input` event so React picks them up.
+// The user still solves any captcha/2FA and clicks Log In themselves.
+function fillField(selector: string, value: string): boolean {
+  const el = document.querySelector(selector) as HTMLInputElement | null;
+  if (!el) return false;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  setter?.call(el, value);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+ipcRenderer.on(IPC.obFill, (_e, p: { email?: string; password?: Uint8Array | null }) => {
+  let pw = '';
+  try {
+    if (p.email) fillField('input[name=email]', p.email);
+    if (p.password && p.password.length) {
+      pw = new TextDecoder().decode(p.password);
+      fillField('input[name=password]', pw);
+    }
+  } catch {
+    /* ignore */
+  } finally {
+    // Best-effort wipe of the plaintext we held.
+    pw = '';
+    try { if (p.password) (p.password as Uint8Array).fill(0); } catch { /* ignore */ }
+  }
+});
 
 // Relay main-world messages (shared DOM EventTarget crosses isolated worlds).
 window.addEventListener('message', (e: MessageEvent) => {
