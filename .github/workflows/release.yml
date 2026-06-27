@@ -31,6 +31,15 @@ jobs:
           node-version: 20
           cache: npm
 
+      # uiohook-napi (global push-to-talk hook) is compiled from source against
+      # Electron's ABI by @electron/rebuild, and its libuiohook needs the X11
+      # dev headers (e.g. X11/keysym.h). Bare ubuntu runners don't ship them.
+      - name: Install Linux native build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxt-dev libxinerama-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev
+
       - run: npm ci
 
       - run: npm run build
