@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { ConfigStore } from './config';
 import { IPC } from '../shared/ipc';
 import { isCustomSound } from './notifications';
-import { AccountRuntime, ConnectionState, defaultAccountColors, newAccountConfig } from '../shared/types';
+import { AccountRuntime, COLLAPSED_SIDEBAR_WIDTH, ConnectionState, defaultAccountColors, newAccountConfig } from '../shared/types';
 
 const DISCORD_URL = 'https://discord.com/app';
 const DISCORD_LOGIN_URL = 'https://discord.com/login';
@@ -145,6 +145,9 @@ export class AccountManager {
   /** epoch ms of last activation, for auto-hibernate. */
   readonly lastActive = new Map<string, number>();
   private overlay = false;
+  /** Live width (px) the renderer feeds during the sidebar collapse/expand
+   *  animation so the views track the moving edge; null = use configured width. */
+  private sidebarOverride: number | null = null;
   activeId: string | null = null;
   /** Combined cosmetic CSS contributed by plugins (discord-css permission). */
   private pluginCss = '';
@@ -256,11 +259,22 @@ export class AccountManager {
   layout() {
     const ui = this.cfg.get().ui;
     const [w, h] = this.win.getContentSize();
-    const sb = ui.sidebarCollapsed ? 64 : ui.sidebarWidth;
+    const sb = this.sidebarOverride ?? (ui.sidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : ui.sidebarWidth);
     const x = ui.sidebarSide === 'left' ? sb : 0;
     const width = Math.max(0, w - sb);
     for (const view of this.views.values()) view.setBounds({ x, y: TITLE_BAR_HEIGHT, width, height: Math.max(0, h - TITLE_BAR_HEIGHT) });
     this.applyVisibility();
+  }
+
+  /**
+   * Drive the views' shared edge from the renderer's live sidebar width during a
+   * collapse/expand animation so they follow the moving edge frame-by-frame
+   * instead of snapping to the final bounds. `null` clears the override and
+   * settles back to the configured width.
+   */
+  setSidebarOverride(width: number | null) {
+    this.sidebarOverride = width === null ? null : Math.round(width);
+    this.layout();
   }
 
   private applyVisibility() {

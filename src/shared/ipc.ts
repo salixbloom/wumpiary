@@ -22,6 +22,7 @@ export const IPC = {
   pickSource: 'screenshare:pickSource', // renderer -> main: chosen screen/window for Go Live (null = cancel)
   patchUi: 'settings:patchUi',
   patchGlobal: 'settings:patchGlobal',
+  layoutSidebar: 'ui:layoutSidebar', // renderer drives the live sidebar width each frame so native views track the collapse/expand animation (null = settle to configured width)
   setOverlay: 'ui:setOverlay', // hide account views while a full-window modal is open
   setWindowBackground: 'ui:setWindowBackground',
   windowMinimize: 'window:minimize',

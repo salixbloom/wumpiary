@@ -31,6 +31,7 @@ const api = {
 
   patchUi: (patch: Partial<UiConfig>) => ipcRenderer.invoke(IPC.patchUi, patch),
   patchGlobal: (patch: GlobalPatch) => ipcRenderer.invoke(IPC.patchGlobal, patch),
+  layoutSidebar: (width: number | null) => ipcRenderer.invoke(IPC.layoutSidebar, width),
   setOverlay: (on: boolean) => ipcRenderer.invoke(IPC.setOverlay, on),
   setWindowBackground: (color: string) => ipcRenderer.invoke(IPC.setWindowBackground, color),
   minimizeWindow: () => ipcRenderer.invoke(IPC.windowMinimize),

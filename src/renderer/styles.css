@@ -142,11 +142,25 @@ input, select { font: inherit; }
   border-left: 1px solid var(--shell-border, var(--border));
   height: 100%;
   flex-shrink: 0;
-  transition: width 0.12s ease;
+  /* Smoothed resize. While collapsing, the transition is stretched to span the
+     footer deck animation so the rail shrinks under the choreography. */
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
+.sidebar.anim-collapsing { transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
 .side-left .sidebar { border-left: none; border-right: 1px solid var(--shell-border, var(--border)); }
 
 .sidebar-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--shell-border, var(--border)); }
+/* Settled-collapsed: stack the toggle and inbox vertically instead of letting the
+   inbox (margin-left:auto) wrap onto a ragged second row in the narrow rail. The
+   `:not(.anim-collapsing)` keeps the expanded row layout *during* the collapse so
+   the toggle can travel over the brand + inbox as the rail shrinks (see the
+   collapse-choreography block below); the column only snaps in once it settles. */
+.sidebar.collapsed:not(.anim-collapsing):not(.anim-expanding) .sidebar-head { flex-direction: column; flex-wrap: nowrap; gap: 6px; padding: 10px 0; }
+.sidebar.collapsed:not(.anim-collapsing):not(.anim-expanding) .inbox-btn { margin-left: 0; }
+/* Keep the row from wrapping (and clip what slides past) while it shrinks. */
+.sidebar.anim-collapsing .sidebar-head { flex-wrap: nowrap; overflow: hidden; }
+/* Even padding around the lone avatar once collapsed. */
+.sidebar.collapsed:not(.anim-collapsing):not(.anim-expanding) .perch { justify-content: center; }
 .brand { font-weight: 700; letter-spacing: 0.3px; }
 .inbox-btn {
   margin-left: auto; position: relative;
@@ -236,6 +250,269 @@ input, select { font: inherit; }
 .icon-btn:hover { background: var(--shell-bg-hover, var(--bg-hover)); }
 .icon-btn.on { background: var(--accent); color: #fff; }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- footer actions (dnd / settings / lock) ---- */
+.foot-row { display: flex; gap: 6px; }
+
+/* Collapsed: a single trigger that unfurls the three actions vertically. */
+.foot-collapsed { position: relative; display: flex; justify-content: center; width: 100%; }
+.foot-more.open { background: var(--shell-bg-hover, var(--bg-hover)); color: var(--text); }
+.foot-stack {
+  position: absolute; bottom: calc(100% + 6px); left: 50%;
+  display: flex; flex-direction: column; gap: 6px; padding: 6px;
+  border-radius: 10px; background: var(--shell-bg-2, var(--bg-2));
+  border: 1px solid var(--shell-border, var(--border));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  animation: foot-stack-in 0.16s ease;
+  z-index: 6;
+}
+@keyframes foot-stack-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+/* centered both at rest and after the unfurl animation finishes */
+.foot-stack { transform: translateX(-50%); }
+
+/* Uncollapse-while-open: the buttons start lined up in a vertical stack above the
+   preserved ⋯ (like the collapsed list), fan out to a full diagonal anchored on
+   the ⋯ — the bell one slot over and one up, settings two/two, lock three/three —
+   then drop straight down into the row. The horizontal "over" is each button's
+   flex slot, so 0% pulls them back to the ⋯'s column (x = -(i+1) slots) for the
+   stack, and the fan releases x to 0. --step matches --slot so over and up are
+   equal (a true 45° diagonal); --i is the column (0 = bell). */
+.foot-row.falling { position: relative; z-index: 5; --step: var(--slot); }
+/* matrix-fall is applied per-role in the expand-choreography block below (it is
+   chained with the slide/punch), so there is no blanket .icon-btn rule here. */
+@keyframes matrix-fall {
+  0% {
+    /* vertical stack above the ⋯: same column (x back to the ⋯), stepped up in y */
+    transform: translate(calc((var(--i) + 1) * var(--slot) * -1), calc((var(--i) + 1) * var(--step) * -1));
+    animation-timing-function: cubic-bezier(0.3, 0.7, 0.3, 1); /* ease out into the fan */
+  }
+  32% {
+    /* fanned out onto the diagonal (x released to the flex slot, still up) */
+    transform: translateY(calc((var(--i) + 1) * var(--step) * -1));
+  }
+  46% {
+    /* brief hold on the diagonal before gravity */
+    transform: translateY(calc((var(--i) + 1) * var(--step) * -1));
+    animation-timing-function: cubic-bezier(0.45, 0, 0.9, 0.5); /* gravity */
+  }
+  84% {
+    transform: translateY(4px); /* hit the floor, slight overshoot */
+    animation-timing-function: ease-out;
+  }
+  100% { transform: translateY(0); } /* settle into the horizontal row */
+}
+
+/* ---- collapse choreography ----------------------------------------------
+   While the rail shrinks (.anim-collapsing) the head and perch rows stay mounted
+   in their expanded layout. The left icons (toggle, avatar) are raised and made
+   opaque so the right-anchored content (brand, inbox, the count number) slides
+   left *under* them as the rail narrows — reading as the icon travelling over it.
+   The text/number fades on the way. Once the rail settles (the class is gone) the
+   compact pieces play their entrance: the inbox is kicked down into the stacked
+   slot, and each account's count bubble pops in top-right, staggered by --idx so
+   the list ripples top-to-bottom. */
+.sidebar.anim-collapsing .toggle-btn,
+.sidebar.anim-collapsing .avatar-wrap { position: relative; z-index: 2; }
+.sidebar.anim-collapsing .toggle-btn { background: var(--shell-bg-2, var(--bg-2)); }
+
+.sidebar.anim-collapsing .brand,
+.sidebar.anim-collapsing .perch-body,
+.sidebar.anim-collapsing .perch-counts { animation: collapse-fade 1s ease-in both; }
+@keyframes collapse-fade {
+  0% { opacity: 1; }
+  70%, 100% { opacity: 0; }
+}
+
+/* Inbox: dropped down into its slot below the toggle, a beat after the toggle has
+   come over it. */
+.sidebar.collapsed:not(.anim-collapsing):not(.anim-expanding) .inbox-btn {
+  animation: inbox-kick 0.42s cubic-bezier(0.3, 1.4, 0.5, 1) 0.12s both;
+}
+@keyframes inbox-kick {
+  0% { transform: translateY(-30px) scale(0.8); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* Count bubble: pops into existence top-right; the per-perch --idx delay makes
+   the column ripple downward (top account first, bottom last). */
+.sidebar.collapsed:not(.anim-collapsing):not(.anim-expanding) .pill.mini {
+  animation: bubble-pop 0.38s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  animation-delay: calc(var(--idx, 0) * 0.07s);
+}
+@keyframes bubble-pop {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ---- expand choreography (head) -----------------------------------------
+   On expand the head is laid out at its FINAL width while the rail is still
+   widening (the sidebar clips the overflow), so the geometry is stable. The
+   inbox rises up over the toggle, "coughs" (jolts left and back, twice), then
+   spits the toggle out to its resting spot; finally "wumpiary" walks in letter
+   by letter with a bouncy squish. --full-w / --obscure are fed in from the
+   component (they depend on the configured sidebar width). */
+.sidebar.anim-expanding { overflow: hidden; }
+.sidebar.anim-expanding .sidebar-head { flex-wrap: nowrap; width: var(--full-w); }
+
+.sidebar.anim-expanding .inbox-btn {
+  position: relative; z-index: 5;
+  animation: inbox-cough 1.45s both;
+}
+@keyframes inbox-cough {
+  0%   { transform: translate(var(--obscure), 34px); }   /* below the toggle (collapsed slot) */
+  10%  { transform: translate(var(--obscure), -3px); }   /* risen up, now over the toggle */
+  /* cough: jolt left and snap back, twice — drawn out so it reads as laboured */
+  21%  { transform: translate(calc(var(--obscure) - 9px), -3px); }
+  31%  { transform: translate(var(--obscure), -3px); }
+  42%  { transform: translate(calc(var(--obscure) - 9px), -3px); }
+  53%  { transform: translate(var(--obscure), -3px); animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.4); }
+  /* spit: wind up left, then shoot right to the resting spot with an overshoot */
+  61%  { transform: translate(calc(var(--obscure) - 14px), -3px); }
+  84%  { transform: translate(7px, 0); animation-timing-function: ease-out; }
+  100% { transform: translate(0, 0); }
+}
+
+/* Toggle: hidden under the inbox until the spit ejects it into place with a pop. */
+.sidebar.anim-expanding .toggle-btn {
+  position: relative; z-index: 1;
+  animation: toggle-eject 1.45s both;
+}
+@keyframes toggle-eject {
+  0%, 55% { transform: translateX(8px) scale(0.5); opacity: 0; }
+  66%     { transform: translateX(-2px) scale(1.18); opacity: 1; }
+  100%    { transform: translateX(0) scale(1); opacity: 1; }
+}
+
+/* Brand: each letter walks in (drops with a squish) on a downward stagger, after
+   the toggle has been spat out. */
+.sidebar.anim-expanding .brand-walk { display: inline-flex; }
+.brand-letter { display: inline-block; white-space: pre; transform-origin: bottom center; }
+.sidebar.anim-expanding .brand-letter {
+  animation: brand-walk 0.46s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  animation-delay: calc(0.9s + var(--li) * 0.04s);
+}
+@keyframes brand-walk {
+  0%   { transform: translateY(-11px) scaleY(1.4) scaleX(0.8); opacity: 0; }
+  60%  { transform: translateY(2px) scaleY(0.82) scaleX(1.12); opacity: 1; } /* squish on landing */
+  100% { transform: translateY(0) scaleY(1) scaleX(1); opacity: 1; }
+}
+
+/* ---- expand choreography (footer) ---------------------------------------
+   The collapsed ⋯ is preserved as a real button at the LEFT of the row, so the
+   three actions arrive offset one slot to its right. The buttons arrive either by
+   matrix-fall (.falling, list was open) or the plain spread (.spread); then the
+   bell leans back and punches the ⋯ out to its left, and every button slides one
+   slot left into the vacated space. The arrival differs by scenario but the punch
+   + slide ending is shared. --slot is the ⋯'s footprint (width + gap). */
+/* --slot (the ⋯'s footprint: its width + the row gap) is measured from the live
+   ghost button by the component and set inline; this is the fallback. Buttons keep
+   their natural widths — only the slide distance needs the exact slot. */
+.foot-row.expanding { position: relative; --slot: 44px; }
+
+/* the preserved ⋯ — a real button (foot-more styling), leftmost, non-interactive */
+.foot-ghost { position: relative; z-index: 1; pointer-events: none; }
+
+@keyframes foot-spread {
+  0%   { transform: translateY(12px) scale(0.4); opacity: 0; }
+  70%  { transform: translateY(-2px) scale(1.08); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+/* slide one slot left, into the gap the punched-out ⋯ leaves behind */
+@keyframes foot-slide {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(calc(-1 * var(--slot))); }
+}
+/* the bell leans back (right, away from the ⋯) then punches left through it,
+   settling into the now-vacated leftmost slot */
+@keyframes bell-punch {
+  0%   { transform: translateX(0) rotate(0); }
+  32%  { transform: translateX(9px) rotate(13deg); }                              /* lean back */
+  70%  { transform: translateX(calc(-1 * var(--slot) - 6px)) rotate(-12deg); }    /* punch through */
+  86%  { transform: translateX(calc(-1 * var(--slot) + 2px)) rotate(3deg); }
+  100% { transform: translateX(calc(-1 * var(--slot))) rotate(0); }
+}
+/* the ⋯ is knocked up and out, timed to the punch making contact */
+@keyframes ghost-knockout {
+  0%   { transform: translate(0, 0) rotate(0) scale(1); opacity: 1; }
+  100% { transform: translate(-14px, -42px) rotate(-48deg) scale(0.55); opacity: 0; }
+}
+
+/* arrivals + shared punch/slide. The arrival and the slide/punch are one
+   `animation` list per role so they sequence on the same element. */
+/* matrix arrival */
+/* NB: the slide/punch use fill `forwards` (not `both`) so they don't backwards-
+   fill over — and thus mask — the arrival animation during the delay phase. */
+.foot-row.falling .icon-btn:not(.foot-ghost):not(.foot-bell) {
+  position: relative;
+  animation: matrix-fall 0.95s both, foot-slide 0.3s ease-out forwards;
+  animation-delay: calc(var(--i) * 0.07s), 1.2s;
+}
+.foot-row.falling .foot-bell {
+  position: relative; z-index: 3;
+  animation: matrix-fall 0.95s both, bell-punch 0.42s forwards;
+  animation-delay: 0s, 1s;
+}
+/* plain spread arrival (delayed so its punch lands at the same time as matrix's) */
+.foot-row.spread .icon-btn:not(.foot-ghost):not(.foot-bell) {
+  position: relative;
+  animation: foot-spread 0.42s cubic-bezier(0.3, 1.4, 0.5, 1) both, foot-slide 0.3s ease-out forwards;
+  animation-delay: calc(0.5s + var(--i) * 0.06s), 1.2s;
+}
+.foot-row.spread .foot-bell {
+  position: relative; z-index: 3;
+  animation: foot-spread 0.42s cubic-bezier(0.3, 1.4, 0.5, 1) both, bell-punch 0.42s forwards;
+  animation-delay: 0.5s, 1s;
+}
+/* shared knockout */
+.foot-row.expanding .foot-ghost { animation: ghost-knockout 0.34s ease-in both 1.22s; }
+
+/* Collapse transition (kept in sync with DURATION.collapsing).
+   The three action buttons slide in against the wall — lock first, then settings,
+   then bell on top — and hold as a pile. After a beat the expand button is pulled
+   from behind the pile, fully up over the top, then dropped down in front. The
+   pile and the risen card both settle on the footer centre, which is exactly
+   where the real (post-animation) button rests, so the reveal has no jump.
+   --i: 0 = bell, 1 = settings, 2 = lock. */
+.foot-deck { position: relative; display: flex; justify-content: center; width: 100%; height: 26px; }
+.deck-card { position: absolute; bottom: 0; left: 50%; pointer-events: none; }
+.deck-card .icon-btn { pointer-events: none; }
+.deck-card:not(.deck-top) {
+  z-index: calc(3 - var(--i)); /* bell ends on top of the pile */
+  animation: deck-gather 1s both;
+  /* lock (i=2) leads, bell (i=0) lands last */
+  animation-delay: calc((2 - var(--i)) * 0.06s);
+}
+.deck-top { z-index: 0; animation: deck-pull 1s both; }
+
+@keyframes deck-gather {
+  /* start where the real button sat, slide onto the centred pile, then hold.
+     --startx is negative for all three (left of centre), so they gather to the
+     right; lock (nearest) lands first, bell (farthest) last. */
+  0%   { transform: translate(calc(-50% + var(--startx)), 0); animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1); }
+  20%  { transform: translate(-50%, calc(var(--i) * -1.5px)); }
+  100% { transform: translate(-50%, calc(var(--i) * -1.5px)); }
+}
+
+@keyframes deck-pull {
+  /* wait behind the pile through the gather + the bell-on-top pause */
+  0%   { transform: translate(-50%, 8px) scale(0.86); opacity: 0; z-index: 0; }
+  42%  { transform: translate(-50%, 8px) scale(0.86); opacity: 0; z-index: 0; }
+  /* peek out from behind, still behind the pile */
+  52%  { transform: translate(-50%, 4px) scale(0.95); opacity: 1; z-index: 0; animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1); }
+  /* risen fully above the stack — a touch over one button height */
+  72%  { transform: translate(-50%, -30px) scale(1); opacity: 1; z-index: 0; }
+  /* brief hold at the apex, now brought in front for the drop */
+  80%  { transform: translate(-50%, -30px) scale(1); opacity: 1; z-index: 9; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.5); }
+  /* drop down with a small overshoot, then settle in front on top */
+  95%  { transform: translate(-50%, 2px) scale(1); opacity: 1; z-index: 9; animation-timing-function: ease-out; }
+  100% { transform: translate(-50%, 0) scale(1); opacity: 1; z-index: 9; }
+}
+
+/* Keep the perches scrollbar from flashing while the rail resizes/animates. */
+.sidebar.busy .perches { overflow: hidden; }
 
 /* ---- lock ---- */
 .lock { height: 100%; display: grid; place-items: center; background: radial-gradient(circle at 50% 30%, var(--bg-3), var(--bg)); }

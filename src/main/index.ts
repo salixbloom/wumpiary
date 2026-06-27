@@ -117,6 +117,15 @@ class AppController {
     if (process.env['ELECTRON_RENDERER_URL']) return; // dev
     const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: wumpiary:; media-src 'self' file: wumpiary:; connect-src 'self'";
     session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+      // This locks down the chrome renderer (loaded over file://, plus its
+      // wumpiary:// sfx assets). The sandboxed plugin host (a data: URL) and the
+      // plugin UI surfaces (wumpiary-plugin://) share this session but carry
+      // their OWN, intentionally permissive CSP — the host and plugin code need
+      // 'unsafe-eval' to evaluate sandboxed plugin JS. Overwriting it here forces
+      // script-src 'self' onto them and breaks every plugin in packaged builds,
+      // so leave those contexts' CSP untouched.
+      const url = details.url || '';
+      if (url.startsWith('wumpiary-plugin:') || url.startsWith('data:')) { cb({ responseHeaders: details.responseHeaders }); return; }
       cb({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
     });
   }
@@ -607,6 +616,7 @@ class AppController {
     invoke(IPC.pickSource, RendererSchemas.pickSource, (_e, id) => { this.pendingSourcePick?.(id); this.pendingSourcePick = null; return { ok: true }; });
 
     invoke(IPC.patchUi, RendererSchemas.patchUi, (_e, patch: Partial<UiConfig>) => guard(() => this.patchUi(patch)));
+    invoke(IPC.layoutSidebar, RendererSchemas.layoutSidebar, (_e, width) => guard(() => this.accounts.setSidebarOverride(width)));
     invoke(IPC.patchGlobal, RendererSchemas.patchGlobal, (_e, patch: GlobalPatch) => guard(() => this.patchGlobal(patch)));
     invoke(IPC.setOverlay, RendererSchemas.setOverlay, (_e, on) => guard(() => this.accounts.setOverlay(on)));
     invoke(IPC.setWindowBackground, RendererSchemas.setWindowBackground, (_e, color) => {

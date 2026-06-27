@@ -6,6 +6,11 @@ export type NotificationFilter = 'all' | 'mentions' | 'dms' | 'mentions+dms' | '
 export type CallPolicy = 'allow' | 'muted' | 'silent' | 'block';
 export type Theme = 'dark' | 'light' | 'system';
 
+// Width (px) of the sidebar rail when collapsed. Wide enough for the 40px avatar
+// to sit with even padding on both sides. Shared so the renderer (CSS width) and
+// main (native view layout) can never drift. Keep in sync with styles.css.
+export const COLLAPSED_SIDEBAR_WIDTH = 72;
+
 export interface ShellTheme {
   name: string | null;
   appFrameBackground: string;

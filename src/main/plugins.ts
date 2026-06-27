@@ -155,22 +155,32 @@ export class PluginManager {
   }
 
   /** Copy plugins bundled with the app into userData. New plugins are copied
-   *  whole; for ones already present we only ADD files that are missing (e.g. a
-   *  README.md added in a later version) — never overwriting your edits. */
+   *  whole. For ones already present we ADD missing files within a version, but
+   *  on an app UPGRADE we overwrite the bundled files with the shipped copies so
+   *  fixes to default plugins actually reach existing installs (otherwise a
+   *  broken manifest/script seeded once would be frozen forever). User data
+   *  (plugin-data/) and grants (permissions.json) live elsewhere and are never
+   *  touched here; only the plugin's own code/manifest/assets get refreshed. */
   private seedBundled() {
     const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
     const src = path.join(base, 'resources', 'plugins');
     let entries: fs.Dirent[] = [];
     try { entries = fs.readdirSync(src, { withFileTypes: true }); } catch { return; }
+    const stampPath = path.join(this.dir, '.bundled-version');
+    const version = app.getVersion();
+    let upgraded = false;
+    try { upgraded = fs.readFileSync(stampPath, 'utf8').trim() !== version; } catch { upgraded = true; }
     for (const ent of entries) {
       if (!ent.isDirectory()) continue;
       const from = path.join(src, ent.name);
       const dest = path.join(this.dir, ent.name);
       try {
         if (!fs.existsSync(dest)) fs.cpSync(from, dest, { recursive: true });
+        else if (upgraded) fs.cpSync(from, dest, { recursive: true, force: true });
         else this.copyMissing(from, dest);
       } catch (e) { console.error('[plugins] seed failed', ent.name, e); }
     }
+    try { fs.writeFileSync(stampPath, version); } catch (e) { console.error('[plugins] seed stamp failed', e); }
   }
 
   /** Recursively copy only files that don't already exist in dest. */

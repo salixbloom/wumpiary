@@ -1,5 +1,7 @@
-import React, { useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { api } from './store';
+import { useSidebarAnim } from './useSidebarAnim';
+import { COLLAPSED_SIDEBAR_WIDTH } from '../shared/types';
 import type { AccountConfig, AccountRuntime, AppState, ConnectionState } from '../shared/types';
 
 interface SidebarProps {
@@ -14,6 +16,14 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
   const order = state.config.accountsOrder;
   const dragId = useRef<string | null>(null);
 
+  // Footer: when collapsed the three actions live behind a single button that
+  // unfurls a vertical list; `footOpen` tracks that list. The collapse/expand
+  // transitions are scripted by the animation manager (see useSidebarAnim).
+  const [footOpen, setFootOpen] = useState(false);
+  const { anim, busy, footFall, toggle, sidebarRef } = useSidebarAnim();
+  const collapsing = anim === 'collapsing';
+  const expanding = anim === 'expanding';
+
   const drop = (targetId: string) => {
     const from = dragId.current;
     dragId.current = null;
@@ -23,13 +33,44 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
     api.reorder(next);
   };
 
+  const toggleSidebar = () => toggle(collapsed, footOpen, () => setFootOpen(false));
+
+  // Measure the ghost ⋯'s real footprint (its width + the 6px row gap) and feed
+  // it to the footer as --slot, so the buttons slide exactly one slot left when it
+  // is punched out — without forcing any button to a fixed width.
+  const measureSlot = useCallback((el: HTMLButtonElement | null) => {
+    if (el?.parentElement) el.parentElement.style.setProperty('--slot', `${el.getBoundingClientRect().width + 6}px`);
+  }, []);
+
+  const footActions: FootAction[] = [
+    {
+      key: 'dnd',
+      title: 'Do Not Disturb (mute all)',
+      className: `icon-btn ${state.config.global.dnd ? 'on' : ''}`,
+      label: state.config.global.dnd ? '🔕' : '🔔',
+      onClick: () => api.patchGlobal({ dnd: !state.config.global.dnd }),
+    },
+    { key: 'settings', title: 'Settings', className: 'icon-btn', label: '⚙', onClick: onOpenSettings },
+    { key: 'lock', title: 'Lock', className: 'icon-btn', label: '🔒', onClick: () => api.lock(), disabled: !state.hasVault },
+  ];
+
   return (
-    <div className="sidebar" style={{ width: collapsed ? 64 : ui.sidebarWidth }}>
+    <div
+      ref={sidebarRef}
+      className={`sidebar ${collapsed ? 'collapsed' : ''} ${busy ? 'busy' : ''} ${collapsing ? 'anim-collapsing' : ''} ${expanding ? 'anim-expanding' : ''}`}
+      style={{
+        width: collapsed ? COLLAPSED_SIDEBAR_WIDTH : ui.sidebarWidth,
+        // Head choreography geometry: lay the head out at its final width while the
+        // rail is still narrow, and how far left the inbox must reach to sit over
+        // the toggle (its "obscure" target). See .sidebar.anim-expanding in css.
+        ...(expanding ? { '--full-w': `${ui.sidebarWidth}px`, '--obscure': `${-(ui.sidebarWidth - 52)}px` } : {}),
+      } as React.CSSProperties}
+    >
       <div className="sidebar-head">
-        <button className="icon-btn" title="Toggle sidebar" onClick={() => api.patchUi({ sidebarCollapsed: !collapsed })}>
+        <button className="icon-btn toggle-btn" title="Toggle sidebar" onClick={toggleSidebar}>
           {ui.sidebarSide === 'right' ? (collapsed ? '‹' : '›') : collapsed ? '›' : '‹'}
         </button>
-        {!collapsed && <span className="brand">wumpiary</span>}
+        {(!collapsed || collapsing || expanding) && <Brand walk={expanding} />}
         <button className="inbox-btn" title="Inbox — notifications from all accounts" onClick={onOpenInbox}>
           <InboxIcon />
           {state.activity.length > 0 && (
@@ -39,13 +80,15 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
       </div>
 
       <div className="perches">
-        {order.map((id) => (
+        {order.map((id, i) => (
           <Perch
             key={id}
             account={state.config.accounts[id]}
             runtime={state.runtime[id]}
             active={state.activeId === id}
             collapsed={collapsed}
+            collapsing={collapsing}
+            index={i}
             onClick={() => api.setActive(id)}
             onContext={(e) => { e.preventDefault(); api.showAccountMenu(id); }}
             onDragStart={() => (dragId.current = id)}
@@ -59,14 +102,91 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
       </div>
 
       <div className="sidebar-foot">
-        <button className={`icon-btn ${state.config.global.dnd ? 'on' : ''}`} title="Do Not Disturb (mute all)" onClick={() => api.patchGlobal({ dnd: !state.config.global.dnd })}>
-          {state.config.global.dnd ? '🔕' : '🔔'}
-        </button>
-        <button className="icon-btn" title="Settings" onClick={onOpenSettings}>⚙</button>
-        <button className="icon-btn" title="Lock" disabled={!state.hasVault} onClick={() => api.lock()}>🔒</button>
+        {collapsing ? (
+          // Collapse transition: the three buttons shuffle into a deck (against
+          // the footer centre, where the collapsed button ends up) and the expand
+          // button is pulled from behind the pile, up over it, then dropped on top.
+          // The rail is still full width here (the manager defers the shrink), so
+          // each card starts from where its real button sits — `--startx` is that
+          // button's centre offset from the footer centre. Layout: 10px padding,
+          // 26px buttons, 6px gaps → centre = 23 + 32*i.
+          <div className="foot-deck">
+            {footActions.map((a, i) => (
+              <span
+                key={a.key}
+                className="deck-card"
+                style={{ '--i': i, '--startx': `${23 + 32 * i - ui.sidebarWidth / 2}px` } as React.CSSProperties}
+              >
+                <button className={a.className} title={a.title} disabled={a.disabled} tabIndex={-1}>
+                  {a.label}
+                </button>
+              </span>
+            ))}
+            <span className="deck-card deck-top">
+              <button className="icon-btn foot-more" tabIndex={-1}>⋯</button>
+            </span>
+          </div>
+        ) : collapsed && !expanding ? (
+          <div className="foot-collapsed">
+            {footOpen && (
+              <div className="foot-stack">
+                {footActions.map((a) => (
+                  <button
+                    key={a.key}
+                    className={a.className}
+                    title={a.title}
+                    disabled={a.disabled}
+                    onClick={() => { setFootOpen(false); a.onClick(); }}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              className={`icon-btn foot-more ${footOpen ? 'open' : ''}`}
+              title="More"
+              onClick={() => setFootOpen((o) => !o)}
+            >
+              ⋯
+            </button>
+          </div>
+        ) : (
+          // Expand arrival into the horizontal row. `falling` (action list was
+          // open) plays the matrix-fall; otherwise the plain `spread` lifts the
+          // buttons out of the collapsed ⋯. Either way the ⋯ is preserved as a
+          // ghost beneath them and the bell leans back then punches it out (see
+          // .foot-row.expanding in styles.css).
+          <div className={`foot-row ${expanding ? 'expanding' : ''} ${expanding ? (footFall ? 'falling' : 'spread') : ''}`}>
+            {/* The preserved ⋯ sits leftmost (a real button) so the actions land one
+                slot to its right; the bell punches it out and they slide left. */}
+            {expanding && <button ref={measureSlot} className="icon-btn foot-more foot-ghost" tabIndex={-1} aria-hidden="true">⋯</button>}
+            {footActions.map((a, i) => (
+              <button
+                key={a.key}
+                className={`${a.className}${expanding && i === 0 ? ' foot-bell' : ''}`}
+                title={a.title}
+                disabled={a.disabled}
+                style={expanding ? ({ '--i': i } as React.CSSProperties) : undefined}
+                onClick={a.onClick}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+interface FootAction {
+  key: string;
+  title: string;
+  className: string;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
 }
 
 const STATUS_LABEL: Record<ConnectionState, string> = {
@@ -79,12 +199,14 @@ const STATUS_LABEL: Record<ConnectionState, string> = {
 };
 
 function Perch({
-  account, runtime, active, collapsed, onClick, onContext, onDragStart, onDrop,
+  account, runtime, active, collapsed, collapsing, index, onClick, onContext, onDragStart, onDrop,
 }: {
   account: AccountConfig;
   runtime?: AccountRuntime;
   active: boolean;
   collapsed: boolean;
+  collapsing: boolean;
+  index: number;
   onClick: () => void;
   onContext: (e: React.MouseEvent) => void;
   onDragStart: () => void;
@@ -97,9 +219,16 @@ function Perch({
   // Shake the avatar when a notification was just surfaced here (a sound was made),
   // cleared once the account is opened — not a generic "has unread" indicator.
   const notifying = (runtime?.notifying ?? false) && !active;
+  // Keep the full row (name/status + count) mounted while the rail is collapsing
+  // so the avatar visibly travels over it as the rail shrinks. The compact count
+  // bubble only appears once collapsed AND the collapse has finished, so it can
+  // pop in as the downward wave (its delay keys off --idx in styles.css).
+  const showRow = !collapsed || collapsing;
+  const showBubble = collapsed && !collapsing && mentions > 0;
   return (
     <div
       className={`perch ${active ? 'active' : ''} ${inCall ? 'in-call' : ''}`}
+      style={{ '--idx': index } as React.CSSProperties}
       onClick={onClick}
       onContextMenu={onContext}
       draggable
@@ -112,21 +241,36 @@ function Perch({
         <Avatar account={account} />
         <span className={`dot ${conn}`} title={STATUS_LABEL[conn]} />
         {account.notifications.muted && <span className="muted-overlay" title="Muted">🔇</span>}
-        {collapsed && mentions > 0 && <span className="pill mention mini">{mentions}</span>}
+        {showBubble && <span className="pill mention mini">{mentions}</span>}
       </div>
-      {!collapsed && (
+      {showRow && (
         <div className="perch-body">
           <span className="perch-label">{account.nickname}</span>
           <span className="perch-sub">{STATUS_LABEL[conn]}</span>
         </div>
       )}
-      {!collapsed && (
+      {showRow && (
         <div className="perch-counts">
           {mentions > 0 && <span className="pill mention">{mentions}</span>}
           {unread > 0 && mentions === 0 && <span className="pill unread">{unread}</span>}
         </div>
       )}
     </div>
+  );
+}
+
+// The brand wordmark. When `walk` is set (expand choreography) each letter is its
+// own span so it can bounce/squish into place on a stagger (--li); otherwise it's
+// a plain label.
+function Brand({ walk }: { walk: boolean }) {
+  const text = 'wumpiary';
+  if (!walk) return <span className="brand">{text}</span>;
+  return (
+    <span className="brand brand-walk" aria-label={text}>
+      {text.split('').map((ch, i) => (
+        <span key={i} className="brand-letter" style={{ '--li': i } as React.CSSProperties}>{ch}</span>
+      ))}
+    </span>
   );
 }
 

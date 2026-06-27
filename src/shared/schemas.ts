@@ -35,6 +35,18 @@ const PluginPermissionEnum = z.enum([
   'hotkeys',
 ]);
 
+// Lenient permission list used ONLY for the on-disk manifest. A manifest that
+// names a permission this app build doesn't know (e.g. one added in a newer
+// version, or removed/renamed across versions) must not brick the whole plugin
+// — we drop the unknown entry (it grants nothing: default-deny) and keep the
+// plugin working with its recognised permissions. The IPC tuple below keeps the
+// STRICT enum, since a grant must always name a real permission.
+const ManifestPermissions = z
+  .array(z.string().max(40))
+  .max(64)
+  .default([])
+  .transform((arr) => arr.filter((p): p is z.infer<typeof PluginPermissionEnum> => PluginPermissionEnum.options.includes(p as never)));
+
 // ---- composite payloads --------------------------------------------------
 const AccountNotifPatch = z
   .object({
@@ -121,6 +133,8 @@ export const RendererSchemas = {
   pickSource: z.tuple([z.string().max(512).nullable()]),
   patchUi: z.tuple([UiPatch]),
   patchGlobal: z.tuple([GlobalPatch]),
+  layoutSidebar: z.tuple([z.number().min(0).max(8192).nullable()]), // live sidebar footprint in px, or null to settle to config
+
   setOverlay: z.tuple([z.boolean()]),
   setWindowBackground: z.tuple([CssColor]),
   windowMinimize: z.tuple([]),
@@ -181,7 +195,7 @@ export const PluginManifestSchema = z
     author: z.string().max(120).optional(),
     entry: PluginFile.optional(),
     contentScript: PluginFile.optional(),
-    permissions: z.array(PluginPermissionEnum).max(16).default([]),
+    permissions: ManifestPermissions,
     metadata: PluginMetadataSchema.optional(),
     ui: PluginUiSchema.optional(),
   })
