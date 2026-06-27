@@ -70,7 +70,7 @@ class AppController {
       (id) => this.activate(id),
       (id, chime) => this.win.webContents.send(IPC.playChime, { accountId: id, chime }),
       (entry) => { this.activity.unshift(entry); this.activity = this.activity.slice(0, 200); this.scheduleState(); },
-      (p) => this.plugins.emitNotification(p),
+      (p) => { this.markNotifying(p.accountId); this.plugins.emitNotification(p); },
     );
     try {
       this.tray = new AppTray(this.cfg, {
@@ -178,7 +178,7 @@ class AppController {
   private ensureRuntime(id: string): AccountRuntime {
     if (!this.runtime[id]) {
       const hib = this.cfg.get().accounts[id]?.hibernated;
-      this.runtime[id] = { id, unread: 0, mentions: 0, connection: hib ? 'hibernated' : 'offline', inCall: false };
+      this.runtime[id] = { id, unread: 0, mentions: 0, connection: hib ? 'hibernated' : 'offline', inCall: false, notifying: false };
     }
     return this.runtime[id];
   }
@@ -268,8 +268,16 @@ class AppController {
     this.showWindow();
     if (this.locked) return;
     this.accounts.setActive(id);
+    if (this.runtime[id]?.notifying) this.onRuntime(id, { notifying: false }); // opened it — stop the shake
     if (this.runtime[id]?.connection === 'signed-out') this.promptAutofillIfUseful(id);
     this.scheduleState();
+  }
+
+  /** Flag that a notification was just surfaced from an account, so its avatar
+   *  shakes — unless you're already looking at it. Cleared when you open it. */
+  private markNotifying(id: string) {
+    if (id === this.accounts?.activeId) return;
+    this.onRuntime(id, { notifying: true });
   }
 
   private promptAutofillIfUseful(id: string) {

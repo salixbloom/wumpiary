@@ -94,8 +94,9 @@ function Perch({
   const mentions = runtime?.mentions ?? 0;
   const unread = runtime?.unread ?? 0;
   const inCall = runtime?.inCall ?? false;
-  // Shake the avatar to flag a pending notification from a non-active account.
-  const notifying = !active && mentions > 0;
+  // Shake the avatar when a notification was just surfaced here (a sound was made),
+  // cleared once the account is opened — not a generic "has unread" indicator.
+  const notifying = (runtime?.notifying ?? false) && !active;
   return (
     <div
       className={`perch ${active ? 'active' : ''} ${inCall ? 'in-call' : ''}`}

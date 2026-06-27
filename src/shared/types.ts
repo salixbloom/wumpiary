@@ -103,6 +103,8 @@ export interface AccountRuntime {
   mentions: number;
   connection: ConnectionState;
   inCall: boolean;
+  /** Transient: a notification was just surfaced from here; cleared on focus. */
+  notifying: boolean;
 }
 
 /** A screen or window offered in the screen-share picker. */
