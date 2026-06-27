@@ -28,6 +28,18 @@ interface WrappedBlob {
   wrapped: string;
 }
 
+interface PwBlob {
+  salt: string;
+  iv: string;
+  tag: string;
+  ct: string;
+}
+
+interface CredRecord {
+  email?: string;
+  pw?: PwBlob; // password encrypted under a PIN-derived key
+}
+
 export class Vault {
   private vaultKey: Buffer | null = null;
 
@@ -57,16 +69,32 @@ export class Vault {
 
   /** Unlock with PIN. Returns false on wrong PIN. */
   unlock(pin: string): boolean {
+    const vaultKey = this.tryUnwrap(pin);
+    if (!vaultKey) return false;
+    this.vaultKey = vaultKey;
+    return true;
+  }
+
+  /** Verify a PIN without changing lock state (used for re-prompts). */
+  verifyPin(pin: string): boolean {
+    const k = this.tryUnwrap(pin);
+    if (!k) return false;
+    k.fill(0);
+    return true;
+  }
+
+  /** Unwrap the vault key from the on-disk blob with the PIN, or null. */
+  private tryUnwrap(pin: string): Buffer | null {
     try {
       const blob = this.readWrapped();
       const pinKey = crypto.scryptSync(pin, Buffer.from(blob.salt, 'base64'), 32, SCRYPT_PARAMS);
       const decipher = crypto.createDecipheriv('aes-256-gcm', pinKey, Buffer.from(blob.iv, 'base64'));
       decipher.setAuthTag(Buffer.from(blob.tag, 'base64'));
       const vaultKey = Buffer.concat([decipher.update(Buffer.from(blob.wrapped, 'base64')), decipher.final()]);
-      this.vaultKey = vaultKey;
-      return true;
+      pinKey.fill(0);
+      return vaultKey;
     } catch {
-      return false; // wrong PIN or corrupt vault
+      return null; // wrong PIN or corrupt vault
     }
   }
 
@@ -103,6 +131,73 @@ export class Vault {
     const cipher = crypto.createCipheriv('aes-256-gcm', this.vaultKey, iv);
     const enc = Buffer.concat([cipher.update(JSON.stringify(obj), 'utf8'), cipher.final()]);
     fs.writeFileSync(SECRET_FILE(), Buffer.concat([iv, cipher.getAuthTag(), enc]));
+  }
+
+  // ---- saved login credentials (for re-login autofill) ------------------
+  // Email is stored inside the vaultKey-encrypted secrets blob. The PASSWORD is
+  // additionally encrypted under a key derived directly from the PIN (scrypt),
+  // so it is undecryptable without re-entering the PIN even while the vault is
+  // unlocked — and the plaintext is wiped from memory immediately after use.
+  // (Changing the PIN invalidates saved passwords; the email is kept.)
+
+  /** Which accounts have a saved email / password. Requires unlock. */
+  listCredentials(): Record<string, { email: boolean; password: boolean }> {
+    const creds = this.readSecrets<{ credentials?: Record<string, CredRecord> }>().credentials ?? {};
+    const out: Record<string, { email: boolean; password: boolean }> = {};
+    for (const [id, rec] of Object.entries(creds)) out[id] = { email: !!rec.email, password: !!rec.pw };
+    return out;
+  }
+
+  getEmail(accountId: string): string | null {
+    const creds = this.readSecrets<{ credentials?: Record<string, CredRecord> }>().credentials ?? {};
+    return creds[accountId]?.email ?? null;
+  }
+
+  /** Save an account's login. `pin` must be the current PIN (gates the password
+   *  encryption). `password` is a Buffer the caller should wipe afterwards. */
+  setCredential(pin: string, accountId: string, email: string, password: Buffer | null): boolean {
+    if (!this.vaultKey) throw new Error('locked');
+    if (!this.verifyPin(pin)) return false;
+    const secrets = this.readSecrets<{ credentials?: Record<string, CredRecord> }>();
+    const creds = secrets.credentials ?? (secrets.credentials = {});
+    const rec: CredRecord = creds[accountId] ?? {};
+    if (email) rec.email = email;
+    if (password && password.length) {
+      const salt = crypto.randomBytes(16);
+      const key = crypto.scryptSync(pin, salt, 32, SCRYPT_PARAMS);
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+      const ct = Buffer.concat([cipher.update(password), cipher.final()]);
+      key.fill(0);
+      rec.pw = { salt: salt.toString('base64'), iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), ct: ct.toString('base64') };
+    }
+    creds[accountId] = rec;
+    this.writeSecrets(secrets);
+    return true;
+  }
+
+  /** Decrypt a saved password with the PIN. Returns a Buffer the CALLER MUST
+   *  wipe (`.fill(0)`) immediately after use, or null on wrong PIN / none. */
+  decryptPassword(pin: string, accountId: string): Buffer | null {
+    if (!this.vaultKey) throw new Error('locked');
+    const blob = this.readSecrets<{ credentials?: Record<string, CredRecord> }>().credentials?.[accountId]?.pw;
+    if (!blob) return null;
+    try {
+      const key = crypto.scryptSync(pin, Buffer.from(blob.salt, 'base64'), 32, SCRYPT_PARAMS);
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(blob.iv, 'base64'));
+      decipher.setAuthTag(Buffer.from(blob.tag, 'base64'));
+      const pt = Buffer.concat([decipher.update(Buffer.from(blob.ct, 'base64')), decipher.final()]);
+      key.fill(0);
+      return pt;
+    } catch {
+      return null; // wrong PIN
+    }
+  }
+
+  deleteCredential(accountId: string): void {
+    if (!this.vaultKey) return;
+    const secrets = this.readSecrets<{ credentials?: Record<string, CredRecord> }>();
+    if (secrets.credentials) { delete secrets.credentials[accountId]; this.writeSecrets(secrets); }
   }
 
   private writeWrapped(vaultKey: Buffer, pin: string): void {

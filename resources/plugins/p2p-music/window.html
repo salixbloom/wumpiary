@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.5 system-ui, sans-serif; color: #dbdee1; background: #2b2d31; user-select: none; }
+  .bar { -webkit-app-region: drag; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #1e1f22; }
+  .bar b { font-size: 13px; }
+  .bar .actions { -webkit-app-region: no-drag; display: flex; gap: 6px; }
+  .wrap { padding: 12px; }
+  h4 { margin: 16px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #949ba4; }
+  h4:first-child { margin-top: 0; }
+  button { background: #4e5058; color: #fff; border: 0; border-radius: 6px; padding: 7px 11px; cursor: pointer; font-size: 13px; }
+  button.primary { background: #5865f2; }
+  button.ghost { background: transparent; color: #b5bac1; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 200px; overflow: auto; }
+  li { display: flex; align-items: center; gap: 8px; background: #1e1f22; border-radius: 6px; padding: 6px 8px; }
+  li.active { outline: 1px solid #5865f2; }
+  li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li .idx { color: #80848e; width: 18px; text-align: right; }
+  .now { background: #1e1f22; border-radius: 8px; padding: 10px; margin-top: 6px; }
+  .now .title { font-weight: 600; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  textarea { width: 100%; height: 64px; resize: none; background: #1e1f22; border: 1px solid #1e1f22; border-radius: 6px; color: #dbdee1; padding: 7px; font: 11px/1.4 ui-monospace, monospace; user-select: text; }
+  textarea:focus { outline: none; border-color: #5865f2; }
+  .hint { color: #949ba4; font-size: 12px; margin: 4px 0; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #4e5058; }
+  .pill.live { background: #248046; }
+  .peers { color: #949ba4; font-size: 12px; }
+  .tabs { display: flex; gap: 4px; margin: 6px 0; }
+  .tabs button { flex: 1; background: #1e1f22; }
+  .tabs button.on { background: #5865f2; }
+  .seg { display: none; }
+  .seg.on { display: block; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <b>♫ P2P Music <span id="role" class="pill">idle</span></b>
+    <div class="actions"><button class="ghost" id="close">✕</button></div>
+  </div>
+  <div class="wrap">
+    <div class="now">
+      <div class="title" id="nowTitle">Nothing playing</div>
+      <div class="row">
+        <button id="prev">⏮</button>
+        <button class="primary" id="play">▶</button>
+        <button id="next">⏭</button>
+        <span id="peers" class="peers"></span>
+      </div>
+    </div>
+
+    <h4>Queue</h4>
+    <div class="row"><button id="load">＋ Add tracks…</button><button class="ghost" id="clear">Clear</button></div>
+    <ul id="queue"></ul>
+
+    <h4>Listen together</h4>
+    <div class="tabs">
+      <button id="tabHost" class="on">Host</button>
+      <button id="tabJoin">Join</button>
+    </div>
+
+    <div id="segHost" class="seg on">
+      <p class="hint">Host the session, copy the invite code to a friend, then paste the answer they send back.</p>
+      <div class="row"><button class="primary" id="startHost">Create invite</button></div>
+      <textarea id="hostInvite" placeholder="invite code appears here…" readonly></textarea>
+      <textarea id="hostAnswer" placeholder="paste your friend's answer code here…"></textarea>
+      <div class="row"><button id="acceptAnswer" disabled>Connect</button></div>
+    </div>
+
+    <div id="segJoin" class="seg">
+      <p class="hint">Paste a host's invite code, then send the generated answer code back to them.</p>
+      <textarea id="joinInvite" placeholder="paste the host's invite code here…"></textarea>
+      <div class="row"><button class="primary" id="makeAnswer">Generate answer</button></div>
+      <textarea id="joinAnswer" placeholder="answer code appears here…" readonly></textarea>
+    </div>
+  </div>
+
+  <audio id="audio"></audio>
+  <script>
+    var w = window.wumpiary;
+    var audio = document.getElementById('audio');
+    var queue = [];        // [{ name, url }]
+    var index = -1;
+    var pc = null, dc = null, role = 'idle';
+
+    // ---- queue / playback (host-authoritative) ----------------------------
+    function setRole(r) { role = r; var el = document.getElementById('role'); el.textContent = r; el.className = 'pill' + (r === 'hosting' || r === 'connected' ? ' live' : ''); }
+    function fmtName(n) { return n.replace(/\.[a-z0-9]+$/i, ''); }
+
+    function renderQueue() {
+      var ul = document.getElementById('queue');
+      ul.innerHTML = '';
+      queue.forEach(function (t, i) {
+        var li = document.createElement('li');
+        if (i === index) li.className = 'active';
+        var idx = document.createElement('span'); idx.className = 'idx'; idx.textContent = (i + 1); li.appendChild(idx);
+        var nm = document.createElement('span'); nm.className = 'name'; nm.textContent = fmtName(t.name); li.appendChild(nm);
+        li.addEventListener('dblclick', function () { playAt(i); });
+        ul.appendChild(li);
+      });
+      document.getElementById('nowTitle').textContent = index >= 0 && queue[index] ? fmtName(queue[index].name) : 'Nothing playing';
+    }
+
+    function playAt(i) {
+      if (i < 0 || i >= queue.length) return;
+      index = i;
+      audio.src = queue[i].url;
+      audio.play().catch(function () {});
+      renderQueue();
+      pushQueue();
+    }
+
+    document.getElementById('play').addEventListener('click', function () {
+      if (audio.paused) { if (index < 0 && queue.length) playAt(0); else audio.play().catch(function () {}); }
+      else audio.pause();
+      pushQueue();
+    });
+    document.getElementById('next').addEventListener('click', function () { if (index + 1 < queue.length) playAt(index + 1); });
+    document.getElementById('prev').addEventListener('click', function () { if (index > 0) playAt(index - 1); });
+    audio.addEventListener('ended', function () { if (index + 1 < queue.length) playAt(index + 1); });
+    audio.addEventListener('play', function () { document.getElementById('play').textContent = '⏸'; });
+    audio.addEventListener('pause', function () { document.getElementById('play').textContent = '▶'; });
+
+    document.getElementById('clear').addEventListener('click', function () { queue = []; index = -1; audio.removeAttribute('src'); renderQueue(); pushQueue(); });
+
+    document.getElementById('load').addEventListener('click', async function () {
+      var res = await w.files.open({ multiple: true, filters: [{ name: 'Audio', extensions: ['mp3', 'ogg', 'opus', 'flac', 'wav', 'm4a', 'aac'] }] });
+      if (!res || !res.ok || !res.files) return;
+      res.files.forEach(function (f) {
+        var blob = new Blob([f.data]);
+        queue.push({ name: f.name, url: URL.createObjectURL(blob) });
+      });
+      renderQueue();
+      pushQueue();
+      if (index < 0 && queue.length) renderQueue();
+    });
+
+    // ---- WebRTC signalling (manual copy/paste, serverless) ----------------
+    var RTC = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    var enc = function (obj) { return btoa(unescape(encodeURIComponent(JSON.stringify(obj)))); };
+    var dec = function (s) { return JSON.parse(decodeURIComponent(escape(atob(s.trim())))); };
+
+    function gather(p) {
+      return new Promise(function (resolve) {
+        if (p.iceGatheringState === 'complete') return resolve();
+        var t = setTimeout(resolve, 2500);
+        p.addEventListener('icegatheringstatechange', function () {
+          if (p.iceGatheringState === 'complete') { clearTimeout(t); resolve(); }
+        });
+      });
+    }
+
+    function streamFromAudio() {
+      var s = audio.captureStream ? audio.captureStream() : (audio.mozCaptureStream ? audio.mozCaptureStream() : null);
+      return s;
+    }
+
+    function wireDc(channel) {
+      dc = channel;
+      dc.onopen = function () { setRole(role === 'hosting' ? 'hosting' : 'connected'); pushQueue(); };
+      dc.onmessage = function (e) {
+        try {
+          var m = JSON.parse(e.data);
+          if (m.type === 'queue') { // listener mirrors the host's queue (read-only)
+            queue = (m.items || []).map(function (n) { return { name: n, url: null }; });
+            index = m.index; renderQueue();
+            document.getElementById('play').textContent = m.playing ? '⏸' : '▶';
+          }
+        } catch (err) {}
+      };
+    }
+
+    function pushQueue() {
+      if (role !== 'hosting' || !dc || dc.readyState !== 'open') return;
+      dc.send(JSON.stringify({ type: 'queue', items: queue.map(function (t) { return t.name; }), index: index, playing: !audio.paused }));
+    }
+
+    function peers(n) { document.getElementById('peers').textContent = n; }
+
+    // Host
+    document.getElementById('startHost').addEventListener('click', async function () {
+      pc = new RTCPeerConnection(RTC);
+      pc.onconnectionstatechange = function () { peers(pc.connectionState === 'connected' ? '● listener connected' : pc.connectionState); };
+      wireDc(pc.createDataChannel('q'));
+      var s = streamFromAudio();
+      if (s) s.getAudioTracks().forEach(function (tr) { pc.addTrack(tr, s); });
+      var offer = await pc.createOffer(); await pc.setLocalDescription(offer); await gather(pc);
+      document.getElementById('hostInvite').value = enc(pc.localDescription);
+      document.getElementById('acceptAnswer').disabled = false;
+      setRole('hosting');
+    });
+    document.getElementById('acceptAnswer').addEventListener('click', async function () {
+      try { await pc.setRemoteDescription(dec(document.getElementById('hostAnswer').value)); } catch (e) { alert('Bad answer code'); }
+    });
+
+    // Join
+    document.getElementById('makeAnswer').addEventListener('click', async function () {
+      try {
+        pc = new RTCPeerConnection(RTC);
+        pc.ondatachannel = function (e) { wireDc(e.channel); };
+        pc.ontrack = function (e) { audio.srcObject = e.streams[0]; audio.play().catch(function () {}); setRole('connected'); };
+        pc.onconnectionstatechange = function () { peers(pc.connectionState); };
+        await pc.setRemoteDescription(dec(document.getElementById('joinInvite').value));
+        var ans = await pc.createAnswer(); await pc.setLocalDescription(ans); await gather(pc);
+        document.getElementById('joinAnswer').value = enc(pc.localDescription);
+        setRole('joining');
+      } catch (e) { alert('Bad invite code'); }
+    });
+
+    // tabs + chrome
+    function tab(which) {
+      document.getElementById('tabHost').className = which === 'host' ? 'on' : '';
+      document.getElementById('tabJoin').className = which === 'join' ? 'on' : '';
+      document.getElementById('segHost').className = 'seg' + (which === 'host' ? ' on' : '');
+      document.getElementById('segJoin').className = 'seg' + (which === 'join' ? ' on' : '');
+    }
+    document.getElementById('tabHost').addEventListener('click', function () { tab('host'); });
+    document.getElementById('tabJoin').addEventListener('click', function () { tab('join'); });
+    document.getElementById('close').addEventListener('click', function () { w.window.close(); });
+
+    renderQueue();
+  </script>
+</body>
+</html>

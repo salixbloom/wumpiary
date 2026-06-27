@@ -1,0 +1,46 @@
+name: Release
+
+# Builds installers on each OS and uploads them to a GitHub Release whenever a
+# version tag (e.g. v0.2.0) is pushed. electron-builder creates/updates a DRAFT
+# release for the tag and attaches the artifacts plus the latest*.yml update
+# metadata; review and publish it from the GitHub Releases page.
+#
+# Usage:  git tag v0.2.0 && git push origin v0.2.0
+# (Per Git Flow, tag the merge commit on `main`.)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # needed to create the release and upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      # electron-builder auto-detects the runner OS and produces that platform's
+      # targets (Linux: AppImage+deb, Windows: NSIS, macOS: dmg). `--publish
+      # always` uploads them to the draft GitHub Release for this tag.
+      # Builds are UNSIGNED (no certs configured) — fine for personal releases;
+      # add CSC_* / Apple notarization secrets here later to sign.
+      - name: Package & publish
+        run: npx --no-install electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

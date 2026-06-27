@@ -2,17 +2,19 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { api, useStore } from './store';
+import { resolveSoundUrl } from '../shared/sound';
 import './styles.css';
 
 // Sync app state from main.
 api.getState().then(useStore.getState().setState);
 api.onState(useStore.getState().setState);
 
-// Per-account chimes are driven from here so each account can have its own sound.
-api.onPlayChime(({ chime }) => {
+// Renderer owns short UI sound playback; main only decides which sound to play.
+function playSound(sound: string) {
   try {
-    if (chime && chime !== 'default') {
-      const a = new Audio(chime.startsWith('file:') ? chime : `file://${chime}`);
+    const url = resolveSoundUrl(sound);
+    if (url) {
+      const a = new Audio(url);
       a.play().catch(() => undefined);
     } else {
       // built-in default blip
@@ -29,7 +31,11 @@ api.onPlayChime(({ chime }) => {
   } catch {
     /* audio not available */
   }
-});
+}
+
+// Per-account chimes are driven from here so each account can have its own sound.
+api.onPlayChime(({ chime }) => playSound(chime));
+api.onPlaySound(({ sound }) => playSound(sound));
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
