@@ -38,7 +38,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libxt-dev libxinerama-dev libx11-xcb-dev libxkbcommon-dev libxkbcommon-x11-dev
+          sudo apt-get install -y \
+            libx11-dev libxtst-dev libxt-dev libxext-dev libxi-dev \
+            libxinerama-dev libxrandr-dev libx11-xcb-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libxkbfile-dev
 
       - run: npm ci
 
