@@ -93,9 +93,12 @@ function Perch({
   const conn = runtime?.connection ?? 'offline';
   const mentions = runtime?.mentions ?? 0;
   const unread = runtime?.unread ?? 0;
+  const inCall = runtime?.inCall ?? false;
+  // Shake the avatar to flag a pending notification from a non-active account.
+  const notifying = !active && mentions > 0;
   return (
     <div
-      className={`perch ${active ? 'active' : ''}`}
+      className={`perch ${active ? 'active' : ''} ${inCall ? 'in-call' : ''}`}
       onClick={onClick}
       onContextMenu={onContext}
       draggable
@@ -104,7 +107,7 @@ function Perch({
       onDrop={onDrop}
       title={collapsed ? account.nickname : undefined}
     >
-      <div className="avatar-wrap">
+      <div className={`avatar-wrap ${notifying ? 'shake' : ''}`}>
         <Avatar account={account} />
         <span className={`dot ${conn}`} title={STATUS_LABEL[conn]} />
         {account.notifications.muted && <span className="muted-overlay" title="Muted">🔇</span>}

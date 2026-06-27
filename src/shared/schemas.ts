@@ -160,6 +160,9 @@ export const ObserverSchemas = {
   obConnection: z.tuple([
     z.object({ accountId: AccountId, state: ConnectionState }).strip(),
   ]),
+  obCall: z.tuple([
+    z.object({ accountId: AccountId, active: z.boolean() }).strip(),
+  ]),
   obNotification: z.tuple([
     z
       .object({

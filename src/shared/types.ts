@@ -102,6 +102,7 @@ export interface AccountRuntime {
   unread: number;
   mentions: number;
   connection: ConnectionState;
+  inCall: boolean;
 }
 
 /** A screen or window offered in the screen-share picker. */

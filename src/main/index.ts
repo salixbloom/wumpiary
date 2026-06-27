@@ -178,7 +178,7 @@ class AppController {
   private ensureRuntime(id: string): AccountRuntime {
     if (!this.runtime[id]) {
       const hib = this.cfg.get().accounts[id]?.hibernated;
-      this.runtime[id] = { id, unread: 0, mentions: 0, connection: hib ? 'hibernated' : 'offline' };
+      this.runtime[id] = { id, unread: 0, mentions: 0, connection: hib ? 'hibernated' : 'offline', inCall: false };
     }
     return this.runtime[id];
   }
@@ -641,6 +641,7 @@ class AppController {
     on(IPC.obConnection, ObserverSchemas.obConnection, (_e, p) => {
       this.accounts.setConnection(p.accountId, p.state as ConnectionState);
     });
+    on(IPC.obCall, ObserverSchemas.obCall, (_e, p) => this.onRuntime(p.accountId, { inCall: p.active }));
     on(IPC.obNotification, ObserverSchemas.obNotification, (_e, p) => this.router.handle(p as ObserverNotification));
   }
 

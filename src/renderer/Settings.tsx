@@ -318,12 +318,10 @@ function SavedLogin({ accountId, saved }: { accountId: string; saved?: { email: 
       <Row label="Confirm PIN" hint="required to encrypt/save">
         <input type="password" inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} autoComplete="off" />
       </Row>
-      <div className="row">
+      <div className="login-actions">
+        <button className="primary" onClick={save} disabled={!pin || (!email && !password) || busy}>{busy ? 'Saving…' : 'Save login'}</button>
+        {(saved?.email || saved?.password) && <button className="danger" onClick={clear}>Clear saved login</button>}
         {msg && <small className="note">{msg}</small>}
-        <span style={{ marginLeft: 'auto' }}>
-          {(saved?.email || saved?.password) && <button className="danger" onClick={clear}>Clear saved login</button>}{' '}
-          <button className="primary" onClick={save} disabled={!pin || (!email && !password) || busy}>{busy ? 'Saving…' : 'Save login'}</button>
-        </span>
       </div>
     </>
   );
@@ -343,7 +341,7 @@ function Activity({ state }: { state: AppState }) {
     <section>
       <div className="row">
         <h3>Inbox — notifications from all accounts</h3>
-        <button onClick={() => api.clearActivity()}>Clear</button>
+        <button className="secondary" onClick={() => api.clearActivity()}>Clear</button>
       </div>
       {state.activity.length === 0 && <p className="note">Nothing yet.</p>}
       <ul className="activity">
@@ -368,9 +366,9 @@ function Plugins({ state }: { state: AppState }) {
     <section>
       <div className="row">
         <h3>Plugins</h3>
-        <span>
-          <button onClick={() => api.openPluginsFolder()}>Open folder</button>{' '}
-          <button onClick={() => api.reloadPlugins()}>Reload</button>
+        <span className="btn-row">
+          <button className="secondary" onClick={() => api.openPluginsFolder()}>Open folder</button>
+          <button className="secondary" onClick={() => api.reloadPlugins()}>Reload</button>
         </span>
       </div>
       <p className="note">
