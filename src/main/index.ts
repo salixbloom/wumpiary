@@ -61,10 +61,18 @@ class AppController {
     );
     this.plugins = new PluginManager(
       path.join(__dirname, '../preload/plugin-host.js'),
-      (css) => this.accounts.setPluginCss(css),
-      () => this.scheduleState(),
+      path.join(__dirname, '../preload/plugin-ui.js'),
+      () => this.win ?? null,
+      {
+        onDiscordCss: (css) => this.accounts.setPluginCss(css),
+        onChange: () => this.scheduleState(),
+        getAccounts: () => this.pluginAccounts(),
+        dispatchToContent: (pluginId, msg, exceptAccountId) => this.accounts.dispatchToContentScripts(pluginId, msg, exceptAccountId),
+        reinjectContent: () => this.accounts.reinjectContentScripts(),
+      },
     );
     this.plugins.init();
+    this.accounts.setContentScripts(() => this.plugins.getContentScripts());
     this.router = new NotificationRouter(
       this.cfg,
       (id) => this.activate(id),
@@ -637,9 +645,15 @@ class AppController {
     invoke(IPC.setPluginPermission, RendererSchemas.setPluginPermission, (_e, id, perm, granted) => guard(() => this.plugins.setPermission(id, perm, granted)));
     invoke(IPC.reloadPlugins, RendererSchemas.reloadPlugins, () => guard(() => this.plugins.reload()));
     invoke(IPC.openPluginsFolder, RendererSchemas.openPluginsFolder, () => guard(() => this.plugins.openFolder()));
+    invoke(IPC.openPluginWindow, RendererSchemas.openPluginWindow, (_e, id) => guard(() => this.plugins.openWindow(id)));
+    invoke(IPC.openPluginPanel, RendererSchemas.openPluginPanel, (_e, id) => guard(() => this.plugins.openPanel(id)));
+    invoke(IPC.setPluginPanelBounds, RendererSchemas.setPluginPanelBounds, (_e, id, x, y, w, h) => guard(() => this.plugins.setPanelBounds(id, x, y, w, h)));
+    invoke(IPC.closePluginPanel, RendererSchemas.closePluginPanel, (_e, id) => guard(() => this.plugins.closePanel(id)));
+    invoke(IPC.getPluginReadme, RendererSchemas.getPluginReadme, (_e, id) => guard(() => this.plugins.getReadme(id)));
 
-    // sandboxed plugin host -> main (re-validated inside the manager)
-    ipcMain.on(IPC.phCall, (e, msg) => { if (this.plugins.isHostSender(e.sender)) this.plugins.handleHostCall(msg); });
+    // sandboxed plugin host / UI surfaces -> main (re-validated + sender-bound inside the manager)
+    ipcMain.on(IPC.phCall, (e, msg) => this.plugins.handleHostCall(e.sender, msg));
+    ipcMain.handle(IPC.phInvoke, (e, msg) => this.plugins.handleHostInvoke(e.sender, msg));
 
     // observe-only events from account views (least-trusted surface)
     on(IPC.obMetrics, ObserverSchemas.obMetrics, (_e, p) => {
@@ -651,6 +665,7 @@ class AppController {
     });
     on(IPC.obCall, ObserverSchemas.obCall, (_e, p) => this.onRuntime(p.accountId, { inCall: p.active }));
     on(IPC.obNotification, ObserverSchemas.obNotification, (_e, p) => this.router.handle(p as ObserverNotification));
+    on(IPC.obPluginMsg, ObserverSchemas.obPluginMsg, (_e, p) => this.plugins.handleContentMsg(p as { accountId: string; pluginId: string; channel: string; data: unknown }));
   }
 
   // ---- background timers (resource + security) ---------------------------
@@ -704,6 +719,10 @@ if (isWsl) app.disableHardwareAcceleration();
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'wumpiary', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  // Serves a plugin's own UI files (window.html / panel.html and assets). Each
+  // plugin id is a distinct origin, so plugin localStorage/IndexedDB is isolated
+  // per plugin for free. corsEnabled lets a `network`-granted plugin fetch out.
+  { scheme: 'wumpiary-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
 ]);
 
 if (!app.requestSingleInstanceLock()) {

@@ -39,6 +39,11 @@ export const IPC = {
   setPluginPermission: 'plugins:setPermission',
   reloadPlugins: 'plugins:reload',
   openPluginsFolder: 'plugins:openFolder',
+  openPluginWindow: 'plugins:openWindow', // open a plugin's declared standalone window
+  openPluginPanel: 'plugins:openPanel', // mount a plugin's config panel (config subpage)
+  setPluginPanelBounds: 'plugins:panelBounds', // position the config panel over the renderer's placeholder
+  closePluginPanel: 'plugins:closePanel', // unmount the config panel
+  getPluginReadme: 'plugins:readme', // read a plugin's README.md (help subpage)
 
   // main -> renderer (events)
   stateChanged: 'app:stateChanged',
@@ -57,10 +62,12 @@ export const IPC = {
   obPushToTalk: 'observer:pushToTalk', // main -> view: gate wrapped microphone streams
   obSoundConfig: 'observer:soundConfig', // main -> view: mute Discord's own notification ding when a custom chime is set
   obCall: 'observer:call', // view -> main: this account is/ isn't in an active voice/video call
+  obPluginMsg: 'observer:pluginMsg', // discord-view content script <-> main (plugin content relay)
 
-  // main <-> sandboxed plugin host
-  phMsg: 'pluginhost:msg', // main -> host (load/unload/event/accounts)
-  phCall: 'pluginhost:call', // host -> main (plugin api calls, ready, errors)
+  // main <-> sandboxed plugin host / windows / panels
+  phMsg: 'pluginhost:msg', // main -> host/window (load/unload/event/accounts/broadcast)
+  phCall: 'pluginhost:call', // host/window -> main (fire-and-forget plugin api calls, ready, errors)
+  phInvoke: 'pluginhost:invoke', // host/window -> main (request/response: http, files, clipboard, hotkeys)
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

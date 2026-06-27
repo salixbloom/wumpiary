@@ -26,6 +26,111 @@ html.wump-ptt-held [class*="panels_"] [class*="avatar_"],
 html.wump-ptt-held [class*="avatarWrapper_"] [class*="avatar_"] { ${PTT_RING} }
 `;
 
+// Per-view runtime for `discord-view` plugin content scripts. Injected (once
+// per page) into each Discord view's MAIN world via executeJavaScript so it can
+// touch the page DOM. It runs each granted plugin's content script with a
+// curated `wumpiary` object and relays broadcasts out via window.postMessage,
+// which account-observer (isolated world) forwards to main. main -> content
+// delivery calls window.__wumpPluginRT.dispatch(...) by executeJavaScript.
+// This is the explicit, user-granted, off-by-default exception to observe-only.
+function contentRuntime(accountId: string): string {
+  return `(() => {
+  if (window.__wumpPluginRT) return;
+  const ACCOUNT_ID = ${JSON.stringify(accountId)};
+  const post = (m) => { try { window.postMessage(m, '*'); } catch (e) {} };
+  const findBox = () =>
+    document.querySelector('[role="textbox"][contenteditable="true"]') ||
+    document.querySelector('div[class*="slateContainer"] [contenteditable="true"]') ||
+    document.querySelector('textarea');
+  function makeInput() {
+    const setNative = (el, value) => {
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const d = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (d && d.set) d.set.call(el, value); else el.value = value;
+    };
+    return {
+      targetMessageBox: () => { const b = findBox(); if (b) b.focus(); return !!b; },
+      focusMessageBox: () => { const b = findBox(); if (b) b.focus(); return !!b; },
+      type: (text) => {
+        const b = findBox(); if (!b) return false; b.focus();
+        if (b.isContentEditable) { document.execCommand('insertText', false, String(text)); }
+        else { setNative(b, (b.value || '') + String(text)); b.dispatchEvent(new Event('input', { bubbles: true })); }
+        return true;
+      },
+      send: () => {
+        const b = findBox(); if (!b) return false; b.focus();
+        const o = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+        b.dispatchEvent(new KeyboardEvent('keydown', o));
+        b.dispatchEvent(new KeyboardEvent('keyup', o));
+        return true;
+      },
+      click: (sel) => { const el = document.querySelector(sel); if (el) { el.click(); return true; } return false; },
+      getSelectionText: () => { try { return String(window.getSelection()); } catch (e) { return ''; } },
+      wait: (ms) => new Promise((r) => setTimeout(r, Math.max(0, Math.min(60000, ms | 0)))),
+    };
+  }
+  function makeApi(pluginId) {
+    const handlers = {};
+    return {
+      handlers,
+      api: {
+        accountId: ACCOUNT_ID,
+        pluginId: pluginId,
+        query: (sel) => document.querySelector(sel),
+        queryAll: (sel) => Array.prototype.slice.call(document.querySelectorAll(sel)),
+        onMutation: (cb) => {
+          const mo = new MutationObserver(() => { try { cb(); } catch (e) {} });
+          mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+          return () => mo.disconnect();
+        },
+        addStyle: (css) => {
+          const el = document.createElement('style');
+          el.textContent = String(css || '');
+          (document.head || document.documentElement).appendChild(el);
+          return () => { try { el.remove(); } catch (e) {} };
+        },
+        hide: (el) => { if (el && el.classList) el.classList.add('wump-hidden'); },
+        reveal: (el) => { if (el && el.classList) el.classList.remove('wump-hidden'); },
+        log: function () { try { console.log('[content:' + pluginId + ']', ...arguments); } catch (e) {} },
+        broadcast: (channel, data) => post({ __wumpPlugin: 'broadcast', pluginId: pluginId, channel: String(channel), data: data }),
+        on: (name, cb) => { (handlers[name] || (handlers[name] = new Set())).add(cb); return () => handlers[name] && handlers[name].delete(cb); },
+        input: makeInput(),
+      },
+    };
+  }
+  const RT = {
+    plugins: {},
+    run: function (pluginId, code) {
+      this.stop(pluginId);
+      try {
+        const built = makeApi(pluginId);
+        // eslint-disable-next-line no-new-func
+        const fn = new Function('wumpiary', code + '\\n//# sourceURL=wumpiary-content/' + pluginId);
+        built.cleanup = fn(built.api);
+        this.plugins[pluginId] = built;
+      } catch (e) { post({ __wumpPlugin: 'error', pluginId: pluginId, message: String((e && e.message) || e) }); }
+    },
+    stop: function (pluginId) {
+      const p = this.plugins[pluginId];
+      if (p && typeof p.cleanup === 'function') { try { p.cleanup(); } catch (e) {} }
+      delete this.plugins[pluginId];
+    },
+    stopAll: function () { for (const id in this.plugins) this.stop(id); },
+    dispatch: function (pluginId, msg) {
+      const p = this.plugins[pluginId]; if (!p) return;
+      if (msg && msg.t === 'broadcast') {
+        const set = p.handlers['message:' + msg.channel]; if (!set) return;
+        set.forEach((cb) => { try { cb(msg.data); } catch (e) {} });
+      }
+    },
+  };
+  const st = document.createElement('style');
+  st.textContent = '.wump-hidden{display:none !important;}';
+  (document.head || document.documentElement).appendChild(st);
+  window.__wumpPluginRT = RT;
+})();`;
+}
+
 /**
  * Owns one isolated WebContentsView per account and applies the resource &
  * stability policy validated in the Phase-0 spike (see SPIKE_FINDINGS.md):
@@ -46,6 +151,10 @@ export class AccountManager {
   private cssKeys = new Map<string, string>(); // viewId -> insertCSS handle
   private pttEnabled = false;
   private pttPressed = false;
+  /** Supplies the content scripts (plugin id + source) to inject into every
+   *  Discord view — only enabled plugins granted `discord-view`. Set by the
+   *  controller after the PluginManager is constructed. */
+  private contentScripts?: () => { pluginId: string; code: string }[];
 
   constructor(
     private win: BrowserWindow,
@@ -117,6 +226,7 @@ export class AccountManager {
       wc.insertCSS(PTT_HELD_CSS).catch(() => undefined); // static; cleared with the page on next nav
       this.sendPushToTalkState(view);
       this.sendSoundConfig(view, id);
+      this.injectContentScripts(id, wc);
     });
     wc.on('before-input-event', (_e, input) => this.onInput?.(input));
 
@@ -341,6 +451,40 @@ export class AccountManager {
     const prev = this.cssKeys.get(id);
     if (prev) { wc.removeInsertedCSS(prev).catch(() => undefined); this.cssKeys.delete(id); }
     if (this.pluginCss) wc.insertCSS(this.pluginCss).then((key) => this.cssKeys.set(id, key)).catch(() => undefined);
+  }
+
+  // ---- discord-view plugin content scripts -------------------------------
+  /** Wire the provider that lists which content scripts to inject (set once at startup). */
+  setContentScripts(fn: () => { pluginId: string; code: string }[]) { this.contentScripts = fn; }
+
+  private injectContentScripts(id: string, wc: Electron.WebContents) {
+    const scripts = this.contentScripts?.() ?? [];
+    wc.executeJavaScript(contentRuntime(id))
+      .then(() => wc.executeJavaScript('window.__wumpPluginRT && window.__wumpPluginRT.stopAll()'))
+      .then(() => {
+        for (const s of scripts) {
+          wc.executeJavaScript(`window.__wumpPluginRT && window.__wumpPluginRT.run(${JSON.stringify(s.pluginId)}, ${JSON.stringify(s.code)})`).catch(() => undefined);
+        }
+      })
+      .catch(() => undefined);
+  }
+
+  /** Re-evaluate content scripts in every live view (enable/permission/reload changes). */
+  reinjectContentScripts() {
+    for (const [id, view] of this.views) {
+      const wc = view.webContents;
+      if (!wc.isDestroyed()) this.injectContentScripts(id, wc);
+    }
+  }
+
+  /** Deliver a broadcast/event from main into a plugin's content scripts. */
+  dispatchToContentScripts(pluginId: string, msg: unknown, exceptAccountId?: string) {
+    for (const [id, view] of this.views) {
+      if (id === exceptAccountId) continue;
+      const wc = view.webContents;
+      if (wc.isDestroyed()) continue;
+      wc.executeJavaScript(`window.__wumpPluginRT && window.__wumpPluginRT.dispatch(${JSON.stringify(pluginId)}, ${JSON.stringify(msg)})`).catch(() => undefined);
+    }
   }
 
   setConnection(id: string, state: ConnectionState) {

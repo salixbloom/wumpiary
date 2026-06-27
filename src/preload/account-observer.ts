@@ -11,6 +11,7 @@ const IPC = {
   obPushToTalk: 'observer:pushToTalk',
   obSoundConfig: 'observer:soundConfig',
   obCall: 'observer:call',
+  obPluginMsg: 'observer:pluginMsg',
 } as const;
 
 // OBSERVE-ONLY bridge injected into each Discord account view. It never changes
@@ -384,5 +385,12 @@ window.addEventListener('message', (e: MessageEvent) => {
     ipcRenderer.send(IPC.obConnection, { accountId, state: d.state });
   } else if (d.__wump === 'call') {
     ipcRenderer.send(IPC.obCall, { accountId, active: !!d.active });
+  } else if (d.__wumpPlugin === 'broadcast') {
+    // A `discord-view` plugin's content script broadcasting to its other
+    // contexts. Least-trusted surface; main re-checks the plugin is enabled +
+    // granted and treats the data as untrusted.
+    ipcRenderer.send(IPC.obPluginMsg, { accountId, pluginId: String(d.pluginId ?? ''), channel: String(d.channel ?? ''), data: d.data });
+  } else if (d.__wumpPlugin === 'error') {
+    console.warn('[plugin-content]', d.pluginId, d.message);
   }
 });

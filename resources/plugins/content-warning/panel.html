@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 14px; font: 13px/1.5 system-ui, sans-serif; color: #dbdee1; background: #2b2d31; }
+  h3 { margin: 0 0 4px; font-size: 14px; }
+  p.hint { color: #949ba4; margin: 4px 0 12px; }
+  form { display: flex; gap: 6px; margin-bottom: 10px; }
+  input { flex: 1; background: #1e1f22; border: 1px solid #1e1f22; border-radius: 6px; color: #dbdee1; padding: 7px 9px; outline: none; }
+  input:focus { border-color: #5865f2; }
+  button { background: #5865f2; color: #fff; border: 0; border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+  button.x { background: transparent; color: #949ba4; padding: 2px 6px; }
+  button.x:hover { color: #f23f43; }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  li { display: flex; align-items: center; justify-content: space-between; background: #1e1f22; border-radius: 6px; padding: 6px 6px 6px 10px; }
+  .empty { color: #80848e; font-style: italic; }
+</style>
+</head>
+<body>
+  <h3>Filtered words</h3>
+  <p class="hint">Any message containing one of these (case-insensitive) is blurred until you click to reveal it.</p>
+  <form id="add">
+    <input id="word" placeholder="add a word or phrase…" autocomplete="off" spellcheck="false" />
+    <button type="submit">Add</button>
+  </form>
+  <ul id="list"></ul>
+  <script>
+    var w = window.wumpiary;
+    var words = [];
+    var list = document.getElementById('list');
+
+    function persist() { w.storage.set('words', words); w.broadcast('cw:set', words); }
+
+    function render() {
+      list.innerHTML = '';
+      if (!words.length) { var li = document.createElement('li'); li.className = 'empty'; li.textContent = 'No filtered words yet.'; list.appendChild(li); return; }
+      words.forEach(function (word, i) {
+        var li = document.createElement('li');
+        var span = document.createElement('span'); span.textContent = word; li.appendChild(span);
+        var b = document.createElement('button'); b.className = 'x'; b.textContent = '✕';
+        b.onclick = function () { words.splice(i, 1); persist(); render(); };
+        li.appendChild(b);
+        list.appendChild(li);
+      });
+    }
+
+    document.getElementById('add').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var input = document.getElementById('word');
+      var v = input.value.trim().toLowerCase();
+      if (v && words.indexOf(v) === -1) { words.push(v); persist(); render(); }
+      input.value = '';
+      input.focus();
+    });
+
+    // Stay in sync if edited elsewhere.
+    w.on('message:cw:words', function (l) { words = l || []; render(); });
+
+    (async function () { words = (await w.storage.get('words', [])) || []; render(); })();
+  </script>
+</body>
+</html>

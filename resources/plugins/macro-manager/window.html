@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.5 system-ui, sans-serif; color: #dbdee1; background: #2b2d31; }
+  .bar { -webkit-app-region: drag; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #1e1f22; }
+  .bar .actions { -webkit-app-region: no-drag; }
+  .wrap { padding: 12px; }
+  .warn { background: rgba(242,63,67,.14); border: 1px solid rgba(242,63,67,.5); color: #f5a3a5; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .warn b { color: #f23f43; }
+  .grid { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  li { padding: 7px 9px; background: #1e1f22; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li.on { outline: 1px solid #5865f2; }
+  li small { color: #80848e; display: block; }
+  button { background: #4e5058; color: #fff; border: 0; border-radius: 6px; padding: 7px 11px; cursor: pointer; }
+  button.primary { background: #5865f2; }
+  button.danger { background: transparent; color: #f23f43; }
+  input, textarea { width: 100%; background: #1e1f22; border: 1px solid #1e1f22; border-radius: 6px; color: #dbdee1; padding: 8px; font-size: 13px; }
+  input:focus, textarea:focus { outline: none; border-color: #5865f2; }
+  textarea { height: 260px; resize: vertical; font: 12px/1.5 ui-monospace, monospace; }
+  label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #949ba4; margin: 10px 0 4px; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .hint { color: #949ba4; font-size: 12px; }
+  .api { color: #949ba4; font-size: 11px; margin-top: 8px; }
+  code { background: #1e1f22; padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+  <div class="bar"><b>⚙ Macro Editor</b><div class="actions"><button class="danger" id="close">✕</button></div></div>
+  <div class="wrap">
+    <div class="warn">
+      <b>⚠ Read this.</b> Account automation is strictly prohibited by Discord and can result in
+      permanent account suspension. This plugin is provided as-is and unsupported — wumpiary takes
+      no responsibility for what you do with it. Use it responsibly and at your own risk.
+    </div>
+
+    <div class="grid">
+      <div>
+        <div class="row" style="margin-bottom:8px"><button class="primary" id="add" style="flex:1">＋ New macro</button></div>
+        <ul id="list"></ul>
+      </div>
+      <div id="editor" style="display:none">
+        <label>Name</label>
+        <input id="name" placeholder="My macro" />
+        <label>Global hotkey <span class="hint">(e.g. CommandOrControl+Shift+G)</span></label>
+        <input id="hotkey" placeholder="CommandOrControl+Shift+G" spellcheck="false" />
+        <label>Script</label>
+        <textarea id="code" spellcheck="false"></textarea>
+        <p class="api">
+          Available: <code>macro.targetMessageBox()</code> · <code>macro.type(text)</code> ·
+          <code>macro.send()</code> · <code>macro.click(selector)</code> · <code>await macro.wait(ms)</code> ·
+          <code>macro.getSelection()</code> · <code>macro.clipboard</code> · <code>macro.setClipboard(text)</code> ·
+          <code>macro.query()/queryAll()</code> · <code>macro.log()</code>. Runs only in the active account.
+        </p>
+        <div class="row" style="margin-top:10px"><button class="primary" id="save">Save</button><button class="danger" id="del">Delete</button><span class="hint" id="status"></span></div>
+      </div>
+      <div id="empty" class="hint" style="align-self:start">Select a macro, or create a new one.</div>
+    </div>
+  </div>
+  <script>
+    var w = window.wumpiary;
+    var macros = [];
+    var sel = -1;
+
+    var DEFAULT = '// Type a greeting into the focused channel and send it.\n' +
+      'macro.targetMessageBox();\n' +
+      "macro.type('hello from a wumpiary macro');\n" +
+      'macro.send();\n';
+
+    function listEl() { return document.getElementById('list'); }
+    function show(id) { document.getElementById(id).style.display = ''; }
+    function hide(id) { document.getElementById(id).style.display = 'none'; }
+
+    function renderList() {
+      var ul = listEl(); ul.innerHTML = '';
+      macros.forEach(function (m, i) {
+        var li = document.createElement('li');
+        if (i === sel) li.className = 'on';
+        li.innerHTML = '';
+        var t = document.createTextNode(m.name || '(unnamed)');
+        li.appendChild(t);
+        var s = document.createElement('small'); s.textContent = m.hotkey || 'no hotkey'; li.appendChild(s);
+        li.onclick = function () { select(i); };
+        ul.appendChild(li);
+      });
+    }
+
+    function select(i) {
+      sel = i; renderList();
+      hide('empty'); show('editor');
+      document.getElementById('name').value = macros[i].name || '';
+      document.getElementById('hotkey').value = macros[i].hotkey || '';
+      document.getElementById('code').value = macros[i].code || '';
+      document.getElementById('status').textContent = '';
+    }
+
+    function persist(reload) {
+      w.storage.set('macros', macros);
+      if (reload) w.broadcast('macro:reload');
+    }
+
+    document.getElementById('add').addEventListener('click', function () {
+      macros.push({ id: Date.now().toString(36), name: 'New macro', hotkey: '', code: DEFAULT });
+      sel = macros.length - 1;
+      persist(false);
+      renderList(); select(sel);
+    });
+
+    document.getElementById('save').addEventListener('click', function () {
+      if (sel < 0) return;
+      macros[sel].name = document.getElementById('name').value.trim() || 'New macro';
+      macros[sel].hotkey = document.getElementById('hotkey').value.trim();
+      macros[sel].code = document.getElementById('code').value;
+      persist(true);
+      renderList();
+      document.getElementById('status').textContent = 'Saved · hotkey active';
+    });
+
+    document.getElementById('del').addEventListener('click', function () {
+      if (sel < 0) return;
+      macros.splice(sel, 1); sel = -1;
+      persist(true); renderList();
+      hide('editor'); show('empty');
+    });
+
+    document.getElementById('close').addEventListener('click', function () { w.window.close(); });
+
+    (async function () { macros = (await w.storage.get('macros', [])) || []; renderList(); })();
+  </script>
+</body>
+</html>

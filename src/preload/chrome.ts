@@ -46,6 +46,11 @@ const api = {
   setPluginPermission: (id: string, perm: PluginPermission, granted: boolean) => ipcRenderer.invoke(IPC.setPluginPermission, id, perm, granted),
   reloadPlugins: () => ipcRenderer.invoke(IPC.reloadPlugins),
   openPluginsFolder: () => ipcRenderer.invoke(IPC.openPluginsFolder),
+  openPluginWindow: (id: string) => ipcRenderer.invoke(IPC.openPluginWindow, id),
+  openPluginPanel: (id: string) => ipcRenderer.invoke(IPC.openPluginPanel, id),
+  setPluginPanelBounds: (id: string, x: number, y: number, w: number, h: number) => ipcRenderer.invoke(IPC.setPluginPanelBounds, id, x, y, w, h),
+  closePluginPanel: (id: string) => ipcRenderer.invoke(IPC.closePluginPanel, id),
+  getPluginReadme: (id: string): Promise<string | null> => ipcRenderer.invoke(IPC.getPluginReadme, id),
 
   onState: (cb: (s: AppState) => void): (() => void) => {
     const l = (_e: unknown, s: AppState) => cb(s);

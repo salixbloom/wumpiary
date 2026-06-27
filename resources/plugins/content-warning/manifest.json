@@ -1,0 +1,16 @@
+{
+  "id": "content-warning",
+  "name": "Content Warning",
+  "version": "1.0.0",
+  "description": "Blurs any message containing one of your filtered words until you click to reveal it. Manage the word list from the Filters panel.",
+  "author": "wumpiary",
+  "entry": "index.js",
+  "contentScript": "content.js",
+  "permissions": ["discord-view"],
+  "metadata": {
+    "tags": ["safety", "filter"]
+  },
+  "ui": {
+    "panel": { "entry": "panel.html", "title": "Filters" }
+  }
+}

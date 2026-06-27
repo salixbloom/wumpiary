@@ -1,7 +1,8 @@
 import React from 'react';
 import { api } from './store';
 import type { AppState, NotificationFilter, CallPolicy, Theme, GlobalConfig, AccountConfig } from '../shared/types';
-import { PERMISSION_LABELS } from '../shared/plugins';
+import { PERMISSION_LABELS, HIGH_TRUST_PERMISSIONS, AUTOMATION_WARNING_TEXT } from '../shared/plugins';
+import type { PluginInfo } from '../shared/plugins';
 
 export type SettingsTab = 'general' | 'account' | 'activity' | 'plugins' | 'about';
 
@@ -362,6 +363,15 @@ function Activity({ state }: { state: AppState }) {
 
 function Plugins({ state }: { state: AppState }) {
   const plugins = state.plugins ?? [];
+  // A subpage rendered on top of the list: a plugin's config panel, or its README.
+  const [sub, setSub] = React.useState<{ kind: 'config' | 'help'; id: string } | null>(null);
+  const subPlugin = sub ? plugins.find((p) => p.id === sub.id) ?? null : null;
+
+  if (sub && subPlugin) {
+    if (sub.kind === 'config') return <PluginConfig p={subPlugin} onBack={() => setSub(null)} />;
+    return <PluginHelp p={subPlugin} onBack={() => setSub(null)} />;
+  }
+
   return (
     <section>
       <div className="row">
@@ -372,44 +382,160 @@ function Plugins({ state }: { state: AppState }) {
         </span>
       </div>
       <p className="note">
-        Plugins extend wumpiary's own shell — they run sandboxed (no network, no file access) and can never run code inside Discord.
-        Drop a plugin folder into the plugins directory, then reload. Only enable plugins you trust; grant each permission deliberately.
+        Plugins extend wumpiary's own shell. They run sandboxed (no Node) and are disabled by default; each capability is granted individually.
+        Some can reach the network, read/write files you choose, or — with the high-trust <b>discord-view</b> permission — run a content script
+        inside Discord. Drop a plugin folder into the plugins directory, then reload. Only enable plugins you trust.
       </p>
       {plugins.length === 0 && <p className="note">No plugins installed.</p>}
       <ul className="plugins">
         {plugins.map((p) => (
-          <li key={p.id} className={`plugin ${p.error ? 'has-error' : ''}`}>
-            <div className="plugin-head">
-              <div className="plugin-id">
-                <span className="plugin-name">{p.name}</span>
-                <span className="plugin-version">v{p.version}</span>
-                {p.author && <span className="plugin-author">by {p.author}</span>}
-              </div>
-              <Toggle on={p.enabled} onChange={(v) => api.setPluginEnabled(p.id, v)} />
-            </div>
-            {p.description && <p className="plugin-desc">{p.description}</p>}
-            {p.error && <p className="plugin-error">⚠ {p.error}</p>}
-            {p.permissions.length > 0 && (
-              <div className="plugin-perms">
-                <small>Permissions</small>
-                {p.permissions.map((perm) => (
-                  <div key={perm.name} className="row perm-row">
-                    <div className="row-label">
-                      <span>{perm.name}</span>
-                      <small>{PERMISSION_LABELS[perm.name]}</small>
-                    </div>
-                    <div className="row-control">
-                      <Toggle on={perm.granted} onChange={(v) => api.setPluginPermission(p.id, perm.name, v)} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </li>
+          <PluginCard key={p.id} p={p} onConfig={() => setSub({ kind: 'config', id: p.id })} onHelp={() => setSub({ kind: 'help', id: p.id })} />
         ))}
       </ul>
     </section>
   );
+}
+
+function PluginCard({ p, onConfig, onHelp }: { p: PluginInfo; onConfig: () => void; onHelp: () => void }) {
+  const m = p.metadata ?? {};
+  return (
+    <li className={`plugin ${p.error ? 'has-error' : ''}`}>
+      <div className="plugin-head">
+        <div className="plugin-id">
+          <span className="plugin-name">{p.name}</span>
+          <span className="plugin-version">v{p.version}</span>
+          {p.author && <span className="plugin-author">by {p.author}</span>}
+          {m.automationWarning && (
+            <span className="plugin-badge warn" title={AUTOMATION_WARNING_TEXT} aria-label={AUTOMATION_WARNING_TEXT}>⚠ automation</span>
+          )}
+          {m.experimental && <span className="plugin-badge exp" title="May be unstable or change between versions.">experimental</span>}
+          {(m.tags ?? []).map((t) => (
+            <span key={t} className="plugin-badge tag">{t}</span>
+          ))}
+        </div>
+        <div className="plugin-actions">
+          {p.ui.hasReadme && <button className="icon-btn" title="How to use this plugin" aria-label="Help" onClick={onHelp}>?</button>}
+          {p.enabled && p.ui.hasPanel && <button className="icon-btn" title={`Configure ${p.name}`} aria-label="Configure" onClick={onConfig}>⚙</button>}
+          <Toggle on={p.enabled} onChange={(v) => api.setPluginEnabled(p.id, v)} />
+        </div>
+      </div>
+      {p.description && <p className="plugin-desc">{p.description}</p>}
+      {p.error && <p className="plugin-error">⚠ {p.error}</p>}
+      {p.enabled && p.ui.hasWindow && (
+        <div className="plugin-ui-row">
+          <button className="secondary" onClick={() => api.openPluginWindow(p.id)}>Open {p.ui.windowTitle ?? 'window'}</button>
+        </div>
+      )}
+      {p.permissions.length > 0 && (
+        <div className="plugin-perms">
+          <small>Permissions</small>
+          {p.permissions.map((perm) => (
+            <div key={perm.name} className={`row perm-row ${HIGH_TRUST_PERMISSIONS.includes(perm.name) ? 'high-trust' : ''}`}>
+              <div className="row-label">
+                <span>{perm.name}{HIGH_TRUST_PERMISSIONS.includes(perm.name) && <span className="perm-flag" title="High-trust capability — only grant to plugins you fully trust.">high trust</span>}</span>
+                <small>{PERMISSION_LABELS[perm.name]}</small>
+              </div>
+              <div className="row-control">
+                <Toggle on={perm.granted} onChange={(v) => api.setPluginPermission(p.id, perm.name, v)} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
+// Config subpage: hosts the plugin's panel.html as a native view positioned over
+// the placeholder div. The view's lifetime is bound to this component, so it can
+// never linger over the rest of the UI (the old softlock). Back returns to the list.
+function PluginConfig({ p, onBack }: { p: PluginInfo; onBack: () => void }) {
+  const host = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    api.openPluginPanel(p.id);
+    const send = () => {
+      const r = host.current?.getBoundingClientRect();
+      if (r) api.setPluginPanelBounds(p.id, r.left, r.top, r.width, r.height);
+    };
+    send();
+    const ro = new ResizeObserver(send);
+    if (host.current) ro.observe(host.current);
+    window.addEventListener('resize', send);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', send);
+      api.closePluginPanel(p.id);
+    };
+  }, [p.id]);
+  return (
+    <section className="plugin-subpage">
+      <div className="plugin-subhead">
+        <button className="secondary" onClick={onBack}>← Back</button>
+        <h3>{p.name} · {p.ui.panelTitle ?? 'settings'}</h3>
+      </div>
+      <div className="plugin-config-host" ref={host}>Loading…</div>
+    </section>
+  );
+}
+
+// Help subpage: renders the plugin's README.md (rendered by us as markdown — no
+// plugin code runs here).
+function PluginHelp({ p, onBack }: { p: PluginInfo; onBack: () => void }) {
+  const [md, setMd] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let alive = true;
+    api.getPluginReadme(p.id).then((t) => { if (alive) setMd(t ?? ''); });
+    return () => { alive = false; };
+  }, [p.id]);
+  return (
+    <section className="plugin-subpage">
+      <div className="plugin-subhead">
+        <button className="secondary" onClick={onBack}>← Back</button>
+        <h3>{p.name} · help</h3>
+      </div>
+      {md === null && <p className="note">Loading…</p>}
+      {md === '' && <p className="note">This plugin has no README.md.</p>}
+      {md && <div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(md) }} />}
+    </section>
+  );
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Minimal, safe markdown -> HTML (escape first, then format). Links render as
+// non-clickable text + url to avoid navigating the chrome window.
+function renderMarkdown(src: string): string {
+  const inline = (t: string) =>
+    t
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '$1 (<span class="md-url">$2</span>)');
+  const lines = src.replace(/\r\n/g, '\n').split('\n');
+  let html = '';
+  let inCode = false;
+  let inList = false;
+  const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+  for (const raw of lines) {
+    if (raw.trim().startsWith('```')) {
+      if (inCode) { html += '</code></pre>'; inCode = false; } else { closeList(); html += '<pre><code>'; inCode = true; }
+      continue;
+    }
+    if (inCode) { html += escapeHtml(raw) + '\n'; continue; }
+    const line = escapeHtml(raw);
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { closeList(); const lvl = h[1].length; html += `<h${lvl}>${inline(h[2])}</h${lvl}>`; continue; }
+    const li = line.match(/^\s*[-*]\s+(.*)$/);
+    if (li) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${inline(li[1])}</li>`; continue; }
+    if (!line.trim()) { closeList(); continue; }
+    closeList();
+    html += `<p>${inline(line)}</p>`;
+  }
+  if (inCode) html += '</code></pre>';
+  closeList();
+  return html;
 }
 
 function About() {

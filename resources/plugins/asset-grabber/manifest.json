@@ -1,0 +1,13 @@
+{
+  "id": "asset-grabber",
+  "name": "Asset Grabber",
+  "version": "1.0.0",
+  "description": "Hover any avatar, server icon, emoji or attached image in Discord and click Save to download the original-resolution file to your computer.",
+  "author": "wumpiary",
+  "entry": "index.js",
+  "contentScript": "content.js",
+  "permissions": ["discord-view", "network", "files"],
+  "metadata": {
+    "tags": ["assets", "download"]
+  }
+}

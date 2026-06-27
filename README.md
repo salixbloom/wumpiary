@@ -14,6 +14,7 @@ It loads the genuine Discord web client and **observes only** — it never autom
 - **Security** — PIN-gated encrypted vault (scrypt + AES-256-GCM, bound to the OS keychain where available), auto-lock on idle.
 - **Resource controls** — only the active account is rendered; others stay connected but un-rendered. Opt-in / auto hibernation reclaims an account's RAM (it then stops notifying).
 - **Conveniences** — global DND, tray with aggregate mention badge + quick switch, global hotkeys, themes, activity log, launch-at-login, crash/session recovery.
+- **Plugins** — a sandboxed, permission-gated plugin system that extends wumpiary's shell: react to notifications/accounts, post notifications, restyle Discord, render their own panel/window, reach the network/filesystem, register hotkeys, and (high-trust) run a content script inside Discord. Four examples ship by default. See [PLUGINS.md](PLUGINS.md).
 
 ## Resource & stability model
 

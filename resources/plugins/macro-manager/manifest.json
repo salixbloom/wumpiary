@@ -1,0 +1,17 @@
+{
+  "id": "macro-manager",
+  "name": "Macro Manager",
+  "version": "1.0.0",
+  "description": "Write scripted macros bound to global hotkeys that drive the active Discord view — focus the message box, type, send, click, read/write the clipboard, and more. For power users only.",
+  "author": "wumpiary",
+  "entry": "index.js",
+  "contentScript": "content.js",
+  "permissions": ["discord-view", "hotkeys", "clipboard"],
+  "metadata": {
+    "automationWarning": true,
+    "tags": ["automation", "power-user"]
+  },
+  "ui": {
+    "window": { "entry": "window.html", "title": "Macro Editor", "width": 620, "height": 720, "frame": false }
+  }
+}

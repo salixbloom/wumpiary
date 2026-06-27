@@ -17,6 +17,7 @@ export default defineConfig({
           chrome: resolve(__dirname, 'src/preload/chrome.ts'),
           'account-observer': resolve(__dirname, 'src/preload/account-observer.ts'),
           'plugin-host': resolve(__dirname, 'src/preload/plugin-host.ts'),
+          'plugin-ui': resolve(__dirname, 'src/preload/plugin-ui.ts'),
         },
       },
     },

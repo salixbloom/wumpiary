@@ -1,30 +1,30 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron';
 
-// Sandboxed preload for the hidden plugin-host window. It does NOT run plugin
-// code itself (that would give plugins access to ipcRenderer); instead it
-// exposes a tiny message bridge to the page's main world and injects a runtime
-// there. Plugin code runs entirely in the main world, which — thanks to the
-// host page's CSP (connect-src 'none', no remote origins) — has no network and
-// no Node access. The only thing a plugin can reach is the curated `wumpiary`
-// API object the runtime builds for it, every outbound effect of which is
-// re-validated against the plugin's granted permissions back in the main
-// process (see src/main/plugins.ts).
+// Sandboxed preload for the hidden plugin-host window — the shared context where
+// every enabled plugin's HEADLESS code (its `entry` script) runs. It does NOT
+// run plugin code itself (that would expose ipcRenderer); instead it exposes a
+// tiny message bridge to the page's main world and injects a runtime there.
+// Plugin code runs entirely in the main world, which — thanks to the host page's
+// CSP (connect-src 'none', no remote origins) — has no network and no Node. The
+// only thing a plugin can reach is the curated `wumpiary` API the runtime builds
+// for it, every outbound effect of which is re-validated against the plugin's
+// granted permissions back in the main process (see src/main/plugins.ts).
 //
 // Channel names are inlined (not imported from ../shared/ipc) because a
 // sandboxed preload cannot pull in sibling chunks — same constraint as
 // account-observer.ts.
 const PH_MSG = 'pluginhost:msg'; // main -> host
-const PH_CALL = 'pluginhost:call'; // host -> main
+const PH_CALL = 'pluginhost:call'; // host -> main (fire-and-forget)
+const PH_INVOKE = 'pluginhost:invoke'; // host -> main (request/response)
 
 let deliver: ((m: unknown) => void) | null = null;
 
 contextBridge.exposeInMainWorld('__wumpBridge', {
-  // The main-world runtime registers its receiver here.
   onMessage: (cb: (m: unknown) => void) => {
     deliver = cb;
   },
-  // The main-world runtime relays plugin api-calls / lifecycle here.
   send: (msg: unknown) => ipcRenderer.send(PH_CALL, msg),
+  invoke: (msg: unknown) => ipcRenderer.invoke(PH_INVOKE, msg),
 });
 
 ipcRenderer.on(PH_MSG, (_e, m) => deliver?.(m));
@@ -34,7 +34,13 @@ ipcRenderer.on(PH_MSG, (_e, m) => deliver?.(m));
 // reference ONLY browser globals + window.__wumpBridge (no outer-scope
 // bindings) because it executes in a different world via executeJavaScript.
 function runtime() {
-  const bridge = (window as unknown as { __wumpBridge: { onMessage: (cb: (m: unknown) => void) => void; send: (m: unknown) => void } }).__wumpBridge;
+  const bridge = (window as unknown as {
+    __wumpBridge: {
+      onMessage: (cb: (m: unknown) => void) => void;
+      send: (m: unknown) => void;
+      invoke: (m: unknown) => Promise<unknown>;
+    };
+  }).__wumpBridge;
   interface Loaded {
     handlers: Record<string, Set<(p: unknown) => void>>;
     cleanup: unknown;
@@ -49,23 +55,35 @@ function runtime() {
   function makeApi(id: string, perms: string[], storage: Record<string, unknown>) {
     const handlers: Record<string, Set<(p: unknown) => void>> = {};
     const has = (p: string) => perms.indexOf(p) !== -1;
+    const call = (method: string, args: unknown[]) => bridge.send({ t: 'call', pluginId: id, method, args });
+    const invoke = (method: string, args: unknown[]) => bridge.invoke({ t: 'invoke', pluginId: id, method, args });
     const api: Record<string, unknown> = {
       id,
       on: (name: string, cb: (p: unknown) => void) => {
         (handlers[name] || (handlers[name] = new Set())).add(cb);
         return () => handlers[name] && handlers[name].delete(cb);
       },
-      log: (...a: unknown[]) => bridge.send({ t: 'call', pluginId: id, method: 'log', args: a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))) }),
+      log: (...a: unknown[]) => call('log', a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x)))),
       storage: {
         get: (k: string, d?: unknown) => (Object.prototype.hasOwnProperty.call(storage, k) ? storage[k] : d),
-        set: (k: string, v: unknown) => { storage[k] = v; bridge.send({ t: 'call', pluginId: id, method: 'storageSet', args: [k, v] }); },
-        delete: (k: string) => { delete storage[k]; bridge.send({ t: 'call', pluginId: id, method: 'storageDelete', args: [k] }); },
+        set: (k: string, v: unknown) => { storage[k] = v; call('storageSet', [k, v]); },
+        delete: (k: string) => { delete storage[k]; call('storageDelete', [k]); },
         all: () => JSON.parse(JSON.stringify(storage)),
       },
+      // Intra-plugin message bus: reaches this plugin's other contexts (UI
+      // window, panel, Discord content scripts). Always available.
+      broadcast: (channel: string, data?: unknown) => call('broadcast', [String(channel), data]),
+      // Standalone window control (the config panel is opened by the user from
+      // Settings, not by the plugin).
+      window: { open: () => call('window.open', []), close: () => call('window.close', []) },
     };
     if (has('accounts')) api.getAccounts = () => JSON.parse(JSON.stringify(accounts));
-    if (has('notifications')) api.notify = (o: { title?: string; body?: string }) => bridge.send({ t: 'call', pluginId: id, method: 'notify', args: [{ title: String(o?.title ?? ''), body: String(o?.body ?? '') }] });
-    if (has('discord-css')) api.setDiscordCss = (css: string) => bridge.send({ t: 'call', pluginId: id, method: 'setDiscordCss', args: [String(css ?? '')] });
+    if (has('notifications')) api.notify = (o: { title?: string; body?: string }) => call('notify', [{ title: String(o?.title ?? ''), body: String(o?.body ?? '') }]);
+    if (has('discord-css')) api.setDiscordCss = (css: string) => call('setDiscordCss', [String(css ?? '')]);
+    if (has('network')) api.http = (req: unknown) => invoke('http', [req]);
+    if (has('files')) api.files = { save: (o: unknown) => invoke('files.save', [o]), open: (o: unknown) => invoke('files.open', [o]) };
+    if (has('clipboard')) api.clipboard = { writeText: (s: string) => invoke('clipboard.writeText', [String(s ?? '')]), readText: () => invoke('clipboard.readText', []) };
+    if (has('hotkeys')) api.hotkeys = { register: (accel: string) => invoke('hotkeys.register', [String(accel ?? '')]), unregister: (accel: string) => call('hotkeys.unregister', [String(accel ?? '')]) };
     return { api, handlers };
   }
 
@@ -114,6 +132,7 @@ function runtime() {
     else if (m.t === 'unload') unload();
     else if (m.t === 'event') dispatch(m.name as string, m.payload, m.targets as string[]);
     else if (m.t === 'accounts') { accounts = m.snapshot as unknown[]; dispatch('accounts', accounts, m.targets as string[]); }
+    else if (m.t === 'broadcast') dispatch('message:' + (m.channel as string), m.data, [m.pluginId as string]);
   });
 
   bridge.send({ t: 'ready' });
