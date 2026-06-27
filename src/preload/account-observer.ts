@@ -10,6 +10,7 @@ const IPC = {
   obFill: 'observer:fill',
   obPushToTalk: 'observer:pushToTalk',
   obSoundConfig: 'observer:soundConfig',
+  obCall: 'observer:call',
 } as const;
 
 // OBSERVE-ONLY bridge injected into each Discord account view. It never changes
@@ -191,6 +192,35 @@ const INJECT = `(() => {
     }
   } catch (e) {}
 
+  // Active-call detection: track connected RTCPeerConnections and report so the
+  // shell can highlight accounts that are currently in a voice/video call.
+  try {
+    const OrigPC = window.RTCPeerConnection;
+    if (OrigPC && !OrigPC.__wumpCallWrapped) {
+      const active = new Set();
+      let last = null;
+      const report = () => {
+        const on = active.size > 0;
+        if (on !== last) { last = on; post({ __wump: 'call', active: on }); }
+      };
+      const Wrapped = function (cfg) {
+        const pc = new OrigPC(cfg);
+        const update = () => {
+          if (pc.connectionState === 'connected') active.add(pc); else active.delete(pc);
+          report();
+        };
+        pc.addEventListener('connectionstatechange', update);
+        return pc;
+      };
+      Wrapped.prototype = OrigPC.prototype;
+      Object.getOwnPropertyNames(OrigPC).forEach((k) => { try { if (typeof OrigPC[k] === 'function') Wrapped[k] = OrigPC[k].bind(OrigPC); } catch (e) {} });
+      Wrapped.__wumpCallWrapped = true;
+      window.RTCPeerConnection = Wrapped;
+      try { window.webkitRTCPeerConnection = Wrapped; } catch (e) {}
+      report(); // post initial (not-in-call) state so a reload clears any stale flag
+    }
+  } catch (e) {}
+
   // Unread / mention counts from the document title (e.g. "(3) Discord").
   function metrics() {
     const t = document.title || '';
@@ -352,5 +382,7 @@ window.addEventListener('message', (e: MessageEvent) => {
     });
   } else if (d.__wump === 'conn') {
     ipcRenderer.send(IPC.obConnection, { accountId, state: d.state });
+  } else if (d.__wump === 'call') {
+    ipcRenderer.send(IPC.obCall, { accountId, active: !!d.active });
   }
 });

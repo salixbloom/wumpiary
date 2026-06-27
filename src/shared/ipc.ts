@@ -56,6 +56,7 @@ export const IPC = {
   obFill: 'observer:fill', // main -> view: fill the login form (observe-only exception)
   obPushToTalk: 'observer:pushToTalk', // main -> view: gate wrapped microphone streams
   obSoundConfig: 'observer:soundConfig', // main -> view: mute Discord's own notification ding when a custom chime is set
+  obCall: 'observer:call', // view -> main: this account is/ isn't in an active voice/video call
 
   // main <-> sandboxed plugin host
   phMsg: 'pluginhost:msg', // main -> host (load/unload/event/accounts)
