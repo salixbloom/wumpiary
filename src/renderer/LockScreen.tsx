@@ -1,7 +1,17 @@
 import React, { useState } from 'react';
 import { api } from './store';
+import { createT, LOCALES, LOCALE_IDS, DEFAULT_LOCALE } from '../shared/i18n';
 
-export function LockScreen({ hasVault, encryptionAvailable }: { hasVault: boolean; encryptionAvailable: boolean }) {
+export function LockScreen({
+  hasVault,
+  encryptionAvailable,
+  locale,
+}: {
+  hasVault: boolean;
+  encryptionAvailable: boolean;
+  locale: string;
+}) {
+  const t = createT(locale);
   const setup = !hasVault;
   const [pin, setPin] = useState('');
   const [pin2, setPin2] = useState('');
@@ -11,13 +21,13 @@ export function LockScreen({ hasVault, encryptionAvailable }: { hasVault: boolea
     e.preventDefault();
     setErr('');
     if (setup) {
-      if (pin.length < 4) return setErr('PIN must be at least 4 characters.');
-      if (pin !== pin2) return setErr('PINs do not match.');
+      if (pin.length < 4) return setErr(t('lock.error.tooShort'));
+      if (pin !== pin2) return setErr(t('lock.error.mismatch'));
       await api.setupPin(pin);
     } else {
       const r = await api.unlock(pin);
       if (!r.ok) {
-        setErr(r.waitMs ? `Too many attempts — wait ${Math.ceil(r.waitMs / 1000)}s.` : 'Wrong PIN.');
+        setErr(r.waitMs ? t('lock.error.tooMany', { secs: Math.ceil(r.waitMs / 1000) }) : t('lock.error.wrong'));
         setPin('');
       }
     }
@@ -27,23 +37,35 @@ export function LockScreen({ hasVault, encryptionAvailable }: { hasVault: boolea
     <div className="lock">
       <form className="lock-card" onSubmit={submit}>
         <div className="empty-logo" />
-        <h1>wumpiary</h1>
+        <h1>{t('lock.brand')}</h1>
         {setup ? (
           <>
-            <p>Welcome. Set a PIN to protect your accounts — you'll enter it to unlock the app.</p>
-            <input type="password" autoFocus placeholder="New PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
-            <input type="password" placeholder="Confirm PIN" value={pin2} onChange={(e) => setPin2(e.target.value)} />
-            {!encryptionAvailable && <p className="warn">OS keychain unavailable here — the vault is protected by your PIN alone.</p>}
-            <button className="primary" type="submit">Set PIN &amp; continue</button>
+            <p>{t('lock.setup.hint')}</p>
+            <input type="password" autoFocus placeholder={t('lock.setup.newPin')} value={pin} onChange={(e) => setPin(e.target.value)} />
+            <input type="password" placeholder={t('lock.setup.confirmPin')} value={pin2} onChange={(e) => setPin2(e.target.value)} />
+            {!encryptionAvailable && <p className="warn">{t('lock.setup.keystoreWarning')}</p>}
+            <button className="primary" type="submit">{t('lock.setup.submit')}</button>
           </>
         ) : (
           <>
-            <p>Enter your PIN to unlock and restore all sessions.</p>
-            <input type="password" autoFocus placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
-            <button className="primary" type="submit">Unlock</button>
+            <p>{t('lock.unlock.hint')}</p>
+            <input type="password" autoFocus placeholder={t('lock.unlock.pin')} value={pin} onChange={(e) => setPin(e.target.value)} />
+            <button className="primary" type="submit">{t('lock.unlock.submit')}</button>
           </>
         )}
         {err && <p className="error">{err}</p>}
+        <div className="lock-language">
+          <label htmlFor="lock-locale-select">{t('lock.language')}</label>
+          <select
+            id="lock-locale-select"
+            value={locale ?? DEFAULT_LOCALE}
+            onChange={(e) => api.setLocale(e.target.value)}
+          >
+            {LOCALE_IDS.map((id) => (
+              <option key={id} value={id}>{LOCALES[id]}</option>
+            ))}
+          </select>
+        </div>
       </form>
     </div>
   );

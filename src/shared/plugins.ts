@@ -20,6 +20,7 @@ export type PluginPermission =
   | 'discord-view'
   | 'network'
   | 'files'
+  | 'filesystem'
   | 'clipboard'
   | 'hotkeys';
 
@@ -30,6 +31,7 @@ export const ALL_PERMISSIONS: PluginPermission[] = [
   'discord-view',
   'network',
   'files',
+  'filesystem',
   'clipboard',
   'hotkeys',
 ];
@@ -41,13 +43,17 @@ export const PERMISSION_LABELS: Record<PluginPermission, string> = {
   'discord-view':
     'Run a content script INSIDE the Discord web client — read, hide or extract page content and simulate input (type/send/click). The one capability that writes to Discord.',
   network: 'Make network requests, and connect from its own plugin window (e.g. streaming, P2P)',
-  files: 'Open native Save/Open dialogs to read and write files you choose',
-  clipboard: 'Read from and write to your clipboard',
+  files: 'Open native Save/Open dialogs to read and write files YOU pick each time',
+  filesystem: "Read and write files in a private folder this app manages for the plugin (no access to the rest of your disk)",
+  clipboard: 'Trigger copy/paste on the focused field (cannot read your clipboard contents)',
   hotkeys: 'Register global keyboard shortcuts',
 };
 
-/** Permissions considered especially powerful — surfaced with a caution note. */
-export const HIGH_TRUST_PERMISSIONS: PluginPermission[] = ['discord-view'];
+/** Permissions considered especially powerful — surfaced with a caution note.
+ *  `discord-view` can act as your Discord account; `network` lets a plugin send
+ *  data off your machine (and reach peers/servers over WebRTC), so both are the
+ *  primary exfiltration/abuse vectors and warrant an explicit warning. */
+export const HIGH_TRUST_PERMISSIONS: PluginPermission[] = ['discord-view', 'network'];
 
 /** Display-only manifest metadata, rendered as badges in Settings → Plugins. */
 export interface PluginMetadata {

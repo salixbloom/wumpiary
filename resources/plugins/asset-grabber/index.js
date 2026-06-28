@@ -9,7 +9,9 @@ module.exports = (api) => {
     try {
       const res = await api.http({ url });
       if (!res || res.error || !res.ok || !res.body) {
-        api.notify && api.notify({ title: 'Asset Grabber', body: 'Could not download that asset.' });
+        // The shell stamps the origin (plugin name) as the title itself, so we
+        // only pass a body.
+        api.notify && api.notify({ body: 'Could not download that asset.' });
         api.log('fetch failed', url, res && res.error);
         return;
       }

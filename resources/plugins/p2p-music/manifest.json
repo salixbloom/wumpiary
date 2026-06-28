@@ -2,14 +2,15 @@
   "id": "p2p-music",
   "name": "P2P Music",
   "version": "1.0.0",
-  "description": "A peer-to-peer listen-together music player. Load local tracks into a shared queue and stream them (Opus-compressed) directly to friends over WebRTC — no server, signalling is a copy-paste invite code.",
+  "description": "A peer-to-peer listen-together music player. Load local tracks into a shared queue and stream them (Opus-compressed) live to friends over WebRTC — no server, signalling is a short copy-paste invite code. Hosts pick what listeners may do (pause / skip / queue / remove / vote-skip).",
   "author": "wumpiary",
-  "permissions": ["network", "files"],
+  "permissions": ["network", "files", "discord-view"],
+  "contentScript": "content.js",
   "metadata": {
     "experimental": true,
     "tags": ["music", "p2p", "voice"]
   },
   "ui": {
-    "window": { "entry": "window.html", "title": "P2P Music", "width": 460, "height": 720, "frame": false }
+    "window": { "entry": "window.html", "title": "P2P Music", "width": 460, "height": 760, "frame": false }
   }
 }

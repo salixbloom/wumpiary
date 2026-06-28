@@ -521,6 +521,8 @@ input, select { font: inherit; }
 .lock-card p { color: var(--text-dim); margin: 0; }
 .lock-card input { width: 100%; }
 .lock-card .warn { color: var(--amber); font-size: 12px; }
+.lock-language { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+.lock-language select { font-size: 12px; padding: 4px 8px; }
 .error { color: var(--red); font-size: 13px; margin: 0; }
 
 input[type='password'], input[type='text'], input[type='email'], input:not([type]), select {
@@ -577,6 +579,7 @@ button.danger:hover { background: var(--red); color: #fff; }
 .row-label { display: flex; flex-direction: column; }
 .row-label small { color: var(--text-dim); font-size: 11px; }
 .row-control select, .row-control input[type='text'], .row-control input[type='email'], .row-control input:not([type]) { min-width: 220px; }
+.row-control .slider-val { color: var(--text-dim); font-size: 11px; margin-inline-start: 10px; min-width: 48px; display: inline-block; text-align: right; }
 .note { color: var(--text-dim); font-size: 12px; line-height: 1.5; margin-top: 12px; }
 
 .toggle { width: 42px; height: 24px; border-radius: 12px; background: var(--grey); border: none; position: relative; transition: background 0.12s; }

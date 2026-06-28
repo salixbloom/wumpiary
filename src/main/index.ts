@@ -16,6 +16,7 @@ import { initUpdater } from './updater';
 import { PluginManager } from './plugins';
 import { IPC } from '../shared/ipc';
 import { AccountPatch, AccountRuntime, ActivityEntry, AppState, ConnectionState, GlobalConfig, GlobalPatch, ShellTheme, UiConfig } from '../shared/types';
+import { createT, DEFAULT_LOCALE } from '../shared/i18n';
 
 class AppController {
   private cfg = new ConfigStore();
@@ -69,6 +70,8 @@ class AppController {
         getAccounts: () => this.pluginAccounts(),
         dispatchToContent: (pluginId, msg, exceptAccountId) => this.accounts.dispatchToContentScripts(pluginId, msg, exceptAccountId),
         reinjectContent: () => this.accounts.reinjectContentScripts(),
+        forwardInput: (input) => this.onPushToTalkInput(input),
+        getStorageLimitBytes: () => Math.round((this.cfg.get().global.pluginStorageMb ?? 5) * 1024 * 1024),
       },
     );
     this.plugins.init();
@@ -365,14 +368,15 @@ class AppController {
   private confirmForget(id: string) {
     const acc = this.cfg.get().accounts[id];
     if (!acc) return;
+    const t = createT(this.cfg.get().ui.locale ?? DEFAULT_LOCALE);
     const choice = dialog.showMessageBoxSync(this.win, {
       type: 'warning',
-      buttons: ['Cancel', 'Forget'],
+      buttons: [t('menu.forget.cancel'), t('menu.forget.confirm')],
       defaultId: 0,
       cancelId: 0,
-      title: 'Forget account',
-      message: `Forget "${acc.nickname}"?`,
-      detail: 'This wipes its session and removes it from wumpiary.',
+      title: t('menu.forget.title'),
+      message: t('menu.forget.message', { nickname: acc.nickname }),
+      detail: t('menu.forget.detail'),
     });
     if (choice === 1) this.accounts.forget(id);
   }
@@ -386,6 +390,7 @@ class AppController {
     const c = this.cfg.get();
     const acc = c.accounts[id];
     if (!acc) return;
+    const t = createT(c.ui.locale ?? DEFAULT_LOCALE);
     const signedOut = (this.runtime[id]?.connection ?? 'offline') === 'signed-out';
     const hasSavedPassword = !!(this.vault.unlocked && this.vault.listCredentials()[id]?.password);
 
@@ -405,34 +410,34 @@ class AppController {
       { type: 'separator' },
     ];
     if (signedOut && hasSavedPassword) {
-      template.push({ label: 'Autofill sign-in…', click: () => this.promptAutofillIfUseful(id) });
+      template.push({ label: t('menu.autofill'), click: () => this.promptAutofillIfUseful(id) });
       template.push({ type: 'separator' });
     }
     template.push(
       {
-        label: acc.notifications.muted ? 'Unmute notifications' : 'Mute notifications',
+        label: acc.notifications.muted ? t('menu.unmute') : t('menu.mute'),
         click: () => this.setMuted(id, !acc.notifications.muted),
       },
       {
-        label: 'Snooze',
+        label: t('menu.snooze'),
         submenu: [
-          { label: '15 minutes', click: () => snooze(15) },
-          { label: '1 hour', click: () => snooze(60) },
-          { label: 'Until tomorrow', click: () => snooze('tomorrow') },
-          { label: 'Clear snooze', click: () => snooze('clear') },
+          { label: t('menu.snooze.15min'), click: () => snooze(15) },
+          { label: t('menu.snooze.1hour'), click: () => snooze(60) },
+          { label: t('menu.snooze.tomorrow'), click: () => snooze('tomorrow') },
+          { label: t('menu.snooze.clear'), click: () => snooze('clear') },
         ],
       },
       { type: 'separator' },
       {
-        label: acc.hibernated ? 'Wake account' : 'Hibernate (save RAM, stops notifications)',
+        label: acc.hibernated ? t('menu.wake') : t('menu.hibernate'),
         click: () => { this.accounts.setHibernated(id, !acc.hibernated); this.scheduleState(); },
       },
-      { label: 'Reload', enabled: !acc.hibernated, click: () => this.accounts.reload(id) },
-      { label: 'Account settings…', click: () => this.win.webContents.send(IPC.openAccountSettings, { accountId: id }) },
-      { label: 'Open devtools', enabled: !acc.hibernated, click: () => this.accounts.openDevtools(id) },
+      { label: t('menu.reload'), enabled: !acc.hibernated, click: () => this.accounts.reload(id) },
+      { label: t('menu.accountSettings'), click: () => this.win.webContents.send(IPC.openAccountSettings, { accountId: id }) },
+      { label: t('menu.devtools'), enabled: !acc.hibernated, click: () => this.accounts.openDevtools(id) },
       { type: 'separator' },
-      { label: 'Quick sign out (keep perch)', click: () => this.accounts.signOut(id) },
-      { label: 'Forget account…', click: () => this.confirmForget(id) },
+      { label: t('menu.signout'), click: () => this.accounts.signOut(id) },
+      { label: t('menu.forgetAccount'), click: () => this.confirmForget(id) },
     );
 
     Menu.buildFromTemplate(template).popup({ window: this.win });
@@ -632,6 +637,12 @@ class AppController {
     invoke(IPC.windowClose, RendererSchemas.windowClose, () => { this.win.close(); return { ok: true }; });
     invoke(IPC.clearActivity, RendererSchemas.clearActivity, () => guard(() => { this.activity = []; this.scheduleState(); }));
 
+    invoke(IPC.setLocale, RendererSchemas.setLocale, (_e, locale) => {
+      this.cfg.update((c) => { c.ui.locale = locale; });
+      this.scheduleState();
+      return { ok: true };
+    });
+
     // saved login / autofill
     invoke(IPC.saveLogin, RendererSchemas.saveLogin, (_e, id, email, password, pin) => guard(() => {
       const buf = Buffer.from(password, 'utf8');
@@ -675,7 +686,7 @@ class AppController {
     });
     on(IPC.obCall, ObserverSchemas.obCall, (_e, p) => this.onRuntime(p.accountId, { inCall: p.active }));
     on(IPC.obNotification, ObserverSchemas.obNotification, (_e, p) => this.router.handle(p as ObserverNotification));
-    on(IPC.obPluginMsg, ObserverSchemas.obPluginMsg, (_e, p) => this.plugins.handleContentMsg(p as { accountId: string; pluginId: string; channel: string; data: unknown }));
+    on(IPC.obPluginMsg, ObserverSchemas.obPluginMsg, (_e, p) => this.plugins.handleContentMsg(p as { accountId: string; relayKey: string; channel: string; data: unknown }));
   }
 
   // ---- background timers (resource + security) ---------------------------

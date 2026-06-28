@@ -38,6 +38,7 @@ const api = {
   toggleMaximizeWindow: () => ipcRenderer.invoke(IPC.windowToggleMaximize),
   closeWindow: () => ipcRenderer.invoke(IPC.windowClose),
   clearActivity: () => ipcRenderer.invoke(IPC.clearActivity),
+  setLocale: (locale: string) => ipcRenderer.invoke(IPC.setLocale, locale),
 
   saveLogin: (id: string, email: string, password: string, pin: string): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.saveLogin, id, email, password, pin),
   clearLogin: (id: string) => ipcRenderer.invoke(IPC.clearLogin, id),

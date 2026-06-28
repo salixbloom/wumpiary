@@ -1,7 +1,9 @@
 import React from 'react';
 import { api } from './store';
+import { useT } from './i18n';
+import { LOCALES, LOCALE_IDS } from '../shared/i18n';
 import type { AppState, NotificationFilter, CallPolicy, Theme, GlobalConfig, AccountConfig } from '../shared/types';
-import { PERMISSION_LABELS, HIGH_TRUST_PERMISSIONS, AUTOMATION_WARNING_TEXT } from '../shared/plugins';
+import { HIGH_TRUST_PERMISSIONS } from '../shared/plugins';
 import type { PluginInfo } from '../shared/plugins';
 
 export type SettingsTab = 'general' | 'account' | 'activity' | 'plugins' | 'about';
@@ -16,17 +18,18 @@ interface Props {
 }
 
 export function Settings({ state, tab, accountId, onTab, onSelectAccount, onClose }: Props) {
+  const t = useT();
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <nav className="modal-nav">
-          <div className="modal-title">Settings</div>
-          {(['general', 'account', 'activity', 'plugins', 'about'] as SettingsTab[]).map((t) => (
-            <button key={t} className={tab === t ? 'active' : ''} onClick={() => onTab(t)}>
-              {t[0].toUpperCase() + t.slice(1)}
+          <div className="modal-title">{t('settings.title')}</div>
+          {(['general', 'account', 'activity', 'plugins', 'about'] as SettingsTab[]).map((tabId) => (
+            <button key={tabId} className={tab === tabId ? 'active' : ''} onClick={() => onTab(tabId)}>
+              {t(`settings.tab.${tabId}`)}
             </button>
           ))}
-          <button className="modal-close" onClick={onClose}>Close ✕</button>
+          <button className="modal-close" onClick={onClose}>{t('settings.close')}</button>
         </nav>
         <div className="modal-body">
           {tab === 'general' && <General state={state} />}
@@ -53,53 +56,54 @@ function Row({ label, children, hint }: { label: string; children: React.ReactNo
 }
 
 function General({ state }: { state: AppState }) {
+  const t = useT();
   const { ui, global } = state.config;
   return (
     <section>
-      <h3>Appearance</h3>
-      <Row label="Theme">
+      <h3>{t('settings.general.appearance')}</h3>
+      <Row label={t('settings.general.theme')}>
         <select value={ui.theme} onChange={(e) => api.patchUi({ theme: e.target.value as Theme })}>
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="system">Follow system</option>
+          <option value="dark">{t('settings.general.theme.dark')}</option>
+          <option value="light">{t('settings.general.theme.light')}</option>
+          <option value="system">{t('settings.general.theme.system')}</option>
         </select>
       </Row>
-      <Row label="Accent colour">
+      <Row label={t('settings.general.accentColor')}>
         <input type="color" value={ui.accent} onChange={(e) => api.patchUi({ accent: e.target.value })} />
       </Row>
-      <Row label="Sidebar side">
+      <Row label={t('settings.general.sidebarSide')}>
         <select value={ui.sidebarSide} onChange={(e) => api.patchUi({ sidebarSide: e.target.value as 'left' | 'right' })}>
-          <option value="right">Right</option>
-          <option value="left">Left</option>
+          <option value="right">{t('settings.general.sidebarSide.right')}</option>
+          <option value="left">{t('settings.general.sidebarSide.left')}</option>
         </select>
       </Row>
-      <Row label="Sidebar width" hint="expanded">
+      <Row label={t('settings.general.sidebarWidth')} hint={t('settings.general.sidebarWidth.hint')}>
         <input type="range" min={180} max={360} value={ui.sidebarWidth} onChange={(e) => api.patchUi({ sidebarWidth: +e.target.value })} />
       </Row>
 
-      <h3>Notifications</h3>
-      <Row label="Do Not Disturb" hint="mute all accounts">
+      <h3>{t('settings.general.notifications')}</h3>
+      <Row label={t('settings.general.dnd')} hint={t('settings.general.dnd.hint')}>
         <Toggle on={global.dnd} onChange={(v) => api.patchGlobal({ dnd: v })} />
       </Row>
-      <Row label="Hide message previews" hint="show 'New message' only">
+      <Row label={t('settings.general.hidePreviews')} hint={t('settings.general.hidePreviews.hint')}>
         <Toggle on={global.hidePreviews} onChange={(v) => api.patchGlobal({ hidePreviews: v })} />
       </Row>
 
-      <h3>Voice</h3>
-      <Row label="Push to Talk" hint="gates the microphone while Discord uses voice activity">
+      <h3>{t('settings.general.voice')}</h3>
+      <Row label={t('settings.general.ptt')} hint={t('settings.general.ptt.hint')}>
         <Toggle on={global.pushToTalk.enabled} onChange={(v) => api.patchGlobal({ pushToTalk: { enabled: v } })} />
       </Row>
-      <Row label="Push to Talk key">
+      <Row label={t('settings.general.pttKey')}>
         <HotkeyCapture value={global.pushToTalk} onChange={(pushToTalk) => api.patchGlobal({ pushToTalk })} />
       </Row>
-      <Row label="Activation sound" hint="file path; blank = bundled sound">
+      <Row label={t('settings.general.activateSound')} hint={t('settings.general.activateSound.hint')}>
         <input
           placeholder="default"
           value={global.pushToTalk.activateSound === 'default' ? '' : global.pushToTalk.activateSound}
           onChange={(e) => api.patchGlobal({ pushToTalk: { activateSound: e.target.value || 'default' } })}
         />
       </Row>
-      <Row label="Deactivation sound" hint="file path; blank = bundled sound">
+      <Row label={t('settings.general.deactivateSound')} hint={t('settings.general.deactivateSound.hint')}>
         <input
           placeholder="default"
           value={global.pushToTalk.deactivateSound === 'default' ? '' : global.pushToTalk.deactivateSound}
@@ -107,45 +111,54 @@ function General({ state }: { state: AppState }) {
         />
       </Row>
       {global.pushToTalk.enabled && (
-        <p className="note">{pushToTalkStatusText(state)}</p>
+        <p className="note">{pushToTalkStatusText(state, t)}</p>
       )}
 
-      <h3>Startup &amp; security</h3>
-      <Row label="Launch at login">
+      <h3>{t('settings.general.startup')}</h3>
+      <Row label={t('settings.general.autoLaunch')}>
         <Toggle on={global.autoLaunch} onChange={(v) => api.patchGlobal({ autoLaunch: v })} />
       </Row>
-      <Row label="Start minimized to tray">
+      <Row label={t('settings.general.startMinimized')}>
         <Toggle on={global.startMinimized} onChange={(v) => api.patchGlobal({ startMinimized: v })} />
       </Row>
-      <Row label="Auto-lock when idle">
+      <Row label={t('settings.general.autoLock')}>
         <select value={global.autoLockMinutes} onChange={(e) => api.patchGlobal({ autoLockMinutes: +e.target.value })}>
-          <option value={0}>Off</option>
-          <option value={5}>5 min</option>
-          <option value={15}>15 min</option>
-          <option value={30}>30 min</option>
-          <option value={60}>1 hour</option>
+          <option value={0}>{t('settings.general.autoLock.off')}</option>
+          <option value={5}>{t('settings.general.autoLock.5min')}</option>
+          <option value={15}>{t('settings.general.autoLock.15min')}</option>
+          <option value={30}>{t('settings.general.autoLock.30min')}</option>
+          <option value={60}>{t('settings.general.autoLock.1hour')}</option>
         </select>
       </Row>
 
-      <h3>Resources</h3>
-      <Row label="Auto-hibernate inactive accounts" hint="reclaims RAM; hibernated accounts stop notifying">
+      <h3>{t('settings.general.resources')}</h3>
+      <Row label={t('settings.general.autoHibernate')} hint={t('settings.general.autoHibernate.hint')}>
         <select value={global.autoHibernateMinutes} onChange={(e) => api.patchGlobal({ autoHibernateMinutes: +e.target.value })}>
-          <option value={0}>Off (stay connected)</option>
-          <option value={30}>After 30 min</option>
-          <option value={60}>After 1 hour</option>
-          <option value={180}>After 3 hours</option>
+          <option value={0}>{t('settings.general.autoHibernate.off')}</option>
+          <option value={30}>{t('settings.general.autoHibernate.30min')}</option>
+          <option value={60}>{t('settings.general.autoHibernate.1hour')}</option>
+          <option value={180}>{t('settings.general.autoHibernate.3hours')}</option>
         </select>
       </Row>
-      <p className="note">Connected accounts stay live in the background (their gateway never sleeps), and only the active one is rendered. Hibernation is the only way to free an account's memory — at the cost of its notifications.</p>
+      <p className="note">{t('settings.general.resourcesNote')}</p>
+
+      <h3>{t('settings.general.language')}</h3>
+      <Row label={t('settings.general.language')}>
+        <select value={ui.locale} onChange={(e) => api.setLocale(e.target.value)}>
+          {LOCALE_IDS.map((id) => (
+            <option key={id} value={id}>{LOCALES[id]}</option>
+          ))}
+        </select>
+      </Row>
     </section>
   );
 }
 
-function pushToTalkStatusText(state: AppState) {
+function pushToTalkStatusText(state: AppState, t: (key: string, vars?: Record<string, string | number>) => string) {
   const status = state.pushToTalkStatus;
-  if (status.active) return 'Global key capture is active.';
-  if (status.error) return `Global key capture is unavailable: ${status.error}`;
-  return 'Using focused-window key capture until global key capture starts.';
+  if (status.active) return t('settings.general.pttStatus.active');
+  if (status.error) return t('settings.general.pttStatus.error', { error: status.error });
+  return t('settings.general.pttStatus.fallback');
 }
 
 function HotkeyCapture({
@@ -155,6 +168,7 @@ function HotkeyCapture({
   value: GlobalConfig['pushToTalk'];
   onChange: (value: Partial<GlobalConfig['pushToTalk']>) => void;
 }) {
+  const t = useT();
   const [recording, setRecording] = React.useState(false);
   const ignoreNextClick = React.useRef(false);
   const capture = (e: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -190,7 +204,7 @@ function HotkeyCapture({
       onKeyDown={capture}
       onBlur={() => setRecording(false)}
     >
-      {recording ? 'Press key combo...' : formatHotkey(value)}
+      {recording ? t('hotkey.recording') : formatHotkey(value)}
     </button>
   );
 }
@@ -217,13 +231,14 @@ function isModifierCode(code: string) {
 }
 
 function AccountSettings({ state, accountId, onSelectAccount }: { state: AppState; accountId: string | null; onSelectAccount: (id: string) => void }) {
+  const t = useT();
   const id = accountId && state.config.accounts[accountId] ? accountId : state.config.accountsOrder[0];
   const acc = id ? state.config.accounts[id] : null;
-  if (!acc) return <p className="note">No accounts yet. Add one from the sidebar.</p>;
+  if (!acc) return <p className="note">{t('settings.account.noAccounts')}</p>;
   const n = acc.notifications;
   return (
     <section>
-      <Row label="Account">
+      <Row label={t('settings.account.account')}>
         <select value={id} onChange={(e) => onSelectAccount(e.target.value)}>
           {state.config.accountsOrder.map((aid) => (
             <option key={aid} value={aid}>{state.config.accounts[aid].nickname}</option>
@@ -231,59 +246,60 @@ function AccountSettings({ state, accountId, onSelectAccount }: { state: AppStat
         </select>
       </Row>
 
-      <h3>Identity</h3>
-      <Row label="Nickname">
+      <h3>{t('settings.account.identity')}</h3>
+      <Row label={t('settings.account.nickname')}>
         <input value={acc.nickname} onChange={(e) => api.updateAccount(id, { nickname: e.target.value })} />
       </Row>
-      <Row label="Colour tag">
+      <Row label={t('settings.account.colorTag')}>
         <input type="color" value={acc.color} onChange={(e) => api.updateAccount(id, { color: e.target.value })} />
       </Row>
-      <Row label="Custom avatar" hint="file path, optional">
+      <Row label={t('settings.account.avatar')} hint={t('settings.account.avatar.hint')}>
         <input placeholder="/path/to/image.png" value={acc.avatarOverride ?? ''} onChange={(e) => api.updateAccount(id, { avatarOverride: e.target.value || null })} />
       </Row>
 
-      <h3>Notifications</h3>
-      <Row label="Mute">
+      <h3>{t('settings.account.notifications')}</h3>
+      <Row label={t('settings.account.mute')}>
         <Toggle on={n.muted} onChange={(v) => api.updateAccount(id, { notifications: { muted: v } })} />
       </Row>
-      <Row label="Filter">
+      <Row label={t('settings.account.filter')}>
         <select value={n.filter} onChange={(e) => api.updateAccount(id, { notifications: { filter: e.target.value as NotificationFilter } })}>
-          <option value="all">All messages</option>
-          <option value="mentions+dms">Mentions &amp; DMs</option>
-          <option value="mentions">Mentions only</option>
-          <option value="dms">DMs only</option>
-          <option value="none">Nothing</option>
+          <option value="all">{t('settings.account.filter.all')}</option>
+          <option value="mentions+dms">{t('settings.account.filter.mentionsDms')}</option>
+          <option value="mentions">{t('settings.account.filter.mentions')}</option>
+          <option value="dms">{t('settings.account.filter.dms')}</option>
+          <option value="none">{t('settings.account.filter.none')}</option>
         </select>
       </Row>
-      <Row label="Hide previews">
+      <Row label={t('settings.account.hidePreviews')}>
         <Toggle on={n.hidePreview} onChange={(v) => api.updateAccount(id, { notifications: { hidePreview: v } })} />
       </Row>
-      <Row label="Custom chime" hint="file path; blank = default blip">
+      <Row label={t('settings.account.chime')} hint={t('settings.account.chime.hint')}>
         <input placeholder="default" value={n.chime === 'default' ? '' : n.chime} onChange={(e) => api.updateAccount(id, { notifications: { chime: e.target.value || 'default' } })} />
       </Row>
 
-      <h3>Calls</h3>
-      <Row label="Call policy">
+      <h3>{t('settings.account.calls')}</h3>
+      <Row label={t('settings.account.callPolicy')}>
         <select value={acc.calls.policy} onChange={(e) => api.updateAccount(id, { calls: { policy: e.target.value as CallPolicy } })}>
-          <option value="allow">Allow (popup + ringtone)</option>
-          <option value="muted">Notify but muted</option>
-          <option value="silent">Silent (counter only)</option>
-          <option value="block">Block call notifications</option>
+          <option value="allow">{t('settings.account.callPolicy.allow')}</option>
+          <option value="muted">{t('settings.account.callPolicy.muted')}</option>
+          <option value="silent">{t('settings.account.callPolicy.silent')}</option>
+          <option value="block">{t('settings.account.callPolicy.block')}</option>
         </select>
       </Row>
 
-      <h3>Privacy</h3>
-      <Row label="Proxy" hint="e.g. socks5://host:port — for privacy, not ban evasion">
+      <h3>{t('settings.account.privacy')}</h3>
+      <Row label={t('settings.account.proxy')} hint={t('settings.account.proxy.hint')}>
         <input placeholder="none" value={acc.proxy ?? ''} onChange={(e) => api.updateAccount(id, { proxy: e.target.value || null })} />
       </Row>
 
-      <h3>Saved login</h3>
+      <h3>{t('settings.account.savedLogin')}</h3>
       <SavedLogin accountId={id} saved={state.savedLogins?.[id]} />
     </section>
   );
 }
 
 function SavedLogin({ accountId, saved }: { accountId: string; saved?: { email: boolean; password: boolean } }) {
+  const t = useT();
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [pin, setPin] = React.useState('');
@@ -296,32 +312,31 @@ function SavedLogin({ accountId, saved }: { accountId: string; saved?: { email: 
     const r = await api.saveLogin(accountId, email, password, pin);
     setBusy(false);
     setPassword(''); setPin('');
-    setMsg(r.ok ? 'Saved.' : 'Incorrect PIN — not saved.');
+    setMsg(r.ok ? t('settings.account.savedMsg') : t('settings.account.wrongPin'));
   };
-  const clear = async () => { await api.clearLogin(accountId); setMsg('Cleared.'); };
+  const clear = async () => { await api.clearLogin(accountId); setMsg(t('settings.account.cleared')); };
 
   return (
     <>
+      <p className="note">{t('settings.account.savedLogin.note')}</p>
       <p className="note">
-        Optional. Lets you autofill the login when Discord signs this account out. Your email is kept in the encrypted vault;
-        your password is additionally encrypted under your PIN, so autofilling always re-asks for it. You still click Log In and
-        solve any captcha / 2FA yourself — nothing is submitted automatically.
+        {t('settings.account.savedLogin.status', {
+          email: saved?.email ? '✓' : '—',
+          password: saved?.password ? '✓' : '—',
+        })}
       </p>
-      <p className="note">
-        Currently saved: email {saved?.email ? '✓' : '—'}, password {saved?.password ? '✓' : '—'}.
-      </p>
-      <Row label="Email">
-        <input type="email" placeholder={saved?.email ? '•••• (saved)' : 'name@example.com'} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" />
+      <Row label={t('settings.account.email')}>
+        <input type="email" placeholder={saved?.email ? t('settings.account.email.saved') : t('settings.account.email.placeholder')} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" />
       </Row>
-      <Row label="Password" hint="encrypted under your PIN">
-        <input type="password" placeholder={saved?.password ? '•••• (saved)' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
+      <Row label={t('settings.account.password')} hint={t('settings.account.password.hint')}>
+        <input type="password" placeholder={saved?.password ? t('settings.account.password.saved') : t('settings.account.password.placeholder')} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
       </Row>
-      <Row label="Confirm PIN" hint="required to encrypt/save">
-        <input type="password" inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} autoComplete="off" />
+      <Row label={t('settings.account.confirmPin')} hint={t('settings.account.confirmPin.hint')}>
+        <input type="password" inputMode="numeric" placeholder={t('settings.account.pin')} value={pin} onChange={(e) => setPin(e.target.value)} autoComplete="off" />
       </Row>
       <div className="login-actions">
-        <button className="primary" onClick={save} disabled={!pin || (!email && !password) || busy}>{busy ? 'Saving…' : 'Save login'}</button>
-        {(saved?.email || saved?.password) && <button className="danger" onClick={clear}>Clear saved login</button>}
+        <button className="primary" onClick={save} disabled={!pin || (!email && !password) || busy}>{busy ? t('settings.account.saving') : t('settings.account.saveLogin')}</button>
+        {(saved?.email || saved?.password) && <button className="danger" onClick={clear}>{t('settings.account.clearLogin')}</button>}
         {msg && <small className="note">{msg}</small>}
       </div>
     </>
@@ -338,13 +353,14 @@ function ActAvatar({ account, nickname }: { account?: AccountConfig; nickname: s
 }
 
 function Activity({ state }: { state: AppState }) {
+  const t = useT();
   return (
     <section>
       <div className="row">
-        <h3>Inbox — notifications from all accounts</h3>
-        <button className="secondary" onClick={() => api.clearActivity()}>Clear</button>
+        <h3>{t('settings.activity.inbox')}</h3>
+        <button className="secondary" onClick={() => api.clearActivity()}>{t('settings.activity.clear')}</button>
       </div>
-      {state.activity.length === 0 && <p className="note">Nothing yet.</p>}
+      {state.activity.length === 0 && <p className="note">{t('settings.activity.empty')}</p>}
       <ul className="activity">
         {state.activity.map((a) => (
           <li key={a.id}>
@@ -362,8 +378,8 @@ function Activity({ state }: { state: AppState }) {
 }
 
 function Plugins({ state }: { state: AppState }) {
+  const t = useT();
   const plugins = state.plugins ?? [];
-  // A subpage rendered on top of the list: a plugin's config panel, or its README.
   const [sub, setSub] = React.useState<{ kind: 'config' | 'help'; id: string } | null>(null);
   const subPlugin = sub ? plugins.find((p) => p.id === sub.id) ?? null : null;
 
@@ -375,18 +391,19 @@ function Plugins({ state }: { state: AppState }) {
   return (
     <section>
       <div className="row">
-        <h3>Plugins</h3>
+        <h3>{t('settings.plugins.title')}</h3>
         <span className="btn-row">
-          <button className="secondary" onClick={() => api.openPluginsFolder()}>Open folder</button>
-          <button className="secondary" onClick={() => api.reloadPlugins()}>Reload</button>
+          <button className="secondary" onClick={() => api.openPluginsFolder()}>{t('settings.plugins.openFolder')}</button>
+          <button className="secondary" onClick={() => api.reloadPlugins()}>{t('settings.plugins.reload')}</button>
         </span>
       </div>
-      <p className="note">
-        Plugins extend wumpiary's own shell. They run sandboxed (no Node) and are disabled by default; each capability is granted individually.
-        Some can reach the network, read/write files you choose, or — with the high-trust <b>discord-view</b> permission — run a content script
-        inside Discord. Drop a plugin folder into the plugins directory, then reload. Only enable plugins you trust.
-      </p>
-      {plugins.length === 0 && <p className="note">No plugins installed.</p>}
+      <p className="note">{t('settings.plugins.note')}</p>
+      <Row label={t('settings.plugins.storageLimit')} hint={t('settings.plugins.storageLimit.hint')}>
+        <input type="range" min={1} max={500} value={state.config.global.pluginStorageMb}
+          onChange={(e) => api.patchGlobal({ pluginStorageMb: +e.target.value })} />
+        <small className="slider-val">{t('settings.plugins.storageLimit.value', { mb: state.config.global.pluginStorageMb })}</small>
+      </Row>
+      {plugins.length === 0 && <p className="note">{t('settings.plugins.empty')}</p>}
       <ul className="plugins">
         {plugins.map((p) => (
           <PluginCard key={p.id} p={p} onConfig={() => setSub({ kind: 'config', id: p.id })} onHelp={() => setSub({ kind: 'help', id: p.id })} />
@@ -397,25 +414,27 @@ function Plugins({ state }: { state: AppState }) {
 }
 
 function PluginCard({ p, onConfig, onHelp }: { p: PluginInfo; onConfig: () => void; onHelp: () => void }) {
+  const t = useT();
   const m = p.metadata ?? {};
+  const automationWarning = t('permission.automation.warning');
   return (
     <li className={`plugin ${p.error ? 'has-error' : ''}`}>
       <div className="plugin-head">
         <div className="plugin-id">
           <span className="plugin-name">{p.name}</span>
           <span className="plugin-version">v{p.version}</span>
-          {p.author && <span className="plugin-author">by {p.author}</span>}
+          {p.author && <span className="plugin-author">{t('settings.plugins.by', { author: p.author })}</span>}
           {m.automationWarning && (
-            <span className="plugin-badge warn" title={AUTOMATION_WARNING_TEXT} aria-label={AUTOMATION_WARNING_TEXT}>⚠ automation</span>
+            <span className="plugin-badge warn" title={automationWarning} aria-label={automationWarning}>{t('settings.plugins.automation')}</span>
           )}
-          {m.experimental && <span className="plugin-badge exp" title="May be unstable or change between versions.">experimental</span>}
-          {(m.tags ?? []).map((t) => (
-            <span key={t} className="plugin-badge tag">{t}</span>
+          {m.experimental && <span className="plugin-badge exp" title="May be unstable or change between versions.">{t('settings.plugins.experimental')}</span>}
+          {(m.tags ?? []).map((tag) => (
+            <span key={tag} className="plugin-badge tag">{tag}</span>
           ))}
         </div>
         <div className="plugin-actions">
-          {p.ui.hasReadme && <button className="icon-btn" title="How to use this plugin" aria-label="Help" onClick={onHelp}>?</button>}
-          {p.enabled && p.ui.hasPanel && <button className="icon-btn" title={`Configure ${p.name}`} aria-label="Configure" onClick={onConfig}>⚙</button>}
+          {p.ui.hasReadme && <button className="icon-btn" title={t('settings.plugins.helpTitle')} aria-label={t('settings.plugins.helpLabel')} onClick={onHelp}>?</button>}
+          {p.enabled && p.ui.hasPanel && <button className="icon-btn" title={t('settings.plugins.configureTitle', { name: p.name })} aria-label={t('settings.plugins.configureLabel')} onClick={onConfig}>⚙</button>}
           <Toggle on={p.enabled} onChange={(v) => api.setPluginEnabled(p.id, v)} />
         </div>
       </div>
@@ -423,17 +442,17 @@ function PluginCard({ p, onConfig, onHelp }: { p: PluginInfo; onConfig: () => vo
       {p.error && <p className="plugin-error">⚠ {p.error}</p>}
       {p.enabled && p.ui.hasWindow && (
         <div className="plugin-ui-row">
-          <button className="secondary" onClick={() => api.openPluginWindow(p.id)}>Open {p.ui.windowTitle ?? 'window'}</button>
+          <button className="secondary" onClick={() => api.openPluginWindow(p.id)}>{t('settings.plugins.openWindow', { title: p.ui.windowTitle ?? 'window' })}</button>
         </div>
       )}
       {p.permissions.length > 0 && (
         <div className="plugin-perms">
-          <small>Permissions</small>
+          <small>{t('settings.plugins.permissions')}</small>
           {p.permissions.map((perm) => (
             <div key={perm.name} className={`row perm-row ${HIGH_TRUST_PERMISSIONS.includes(perm.name) ? 'high-trust' : ''}`}>
               <div className="row-label">
-                <span>{perm.name}{HIGH_TRUST_PERMISSIONS.includes(perm.name) && <span className="perm-flag" title="High-trust capability — only grant to plugins you fully trust.">high trust</span>}</span>
-                <small>{PERMISSION_LABELS[perm.name]}</small>
+                <span>{perm.name}{HIGH_TRUST_PERMISSIONS.includes(perm.name) && <span className="perm-flag" title={t('settings.plugins.highTrustTitle')}>{t('settings.plugins.highTrust')}</span>}</span>
+                <small>{t(`permission.${perm.name}`)}</small>
               </div>
               <div className="row-control">
                 <Toggle on={perm.granted} onChange={(v) => api.setPluginPermission(p.id, perm.name, v)} />
@@ -450,6 +469,7 @@ function PluginCard({ p, onConfig, onHelp }: { p: PluginInfo; onConfig: () => vo
 // the placeholder div. The view's lifetime is bound to this component, so it can
 // never linger over the rest of the UI (the old softlock). Back returns to the list.
 function PluginConfig({ p, onBack }: { p: PluginInfo; onBack: () => void }) {
+  const t = useT();
   const host = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     api.openPluginPanel(p.id);
@@ -470,10 +490,10 @@ function PluginConfig({ p, onBack }: { p: PluginInfo; onBack: () => void }) {
   return (
     <section className="plugin-subpage">
       <div className="plugin-subhead">
-        <button className="secondary" onClick={onBack}>← Back</button>
-        <h3>{p.name} · {p.ui.panelTitle ?? 'settings'}</h3>
+        <button className="secondary" onClick={onBack}>{t('settings.plugins.back')}</button>
+        <h3>{t('settings.plugins.configPageTitle', { name: p.name, panelTitle: p.ui.panelTitle ?? t('settings.plugins.panelFallback') })}</h3>
       </div>
-      <div className="plugin-config-host" ref={host}>Loading…</div>
+      <div className="plugin-config-host" ref={host}>{t('settings.plugins.loading')}</div>
     </section>
   );
 }
@@ -481,20 +501,21 @@ function PluginConfig({ p, onBack }: { p: PluginInfo; onBack: () => void }) {
 // Help subpage: renders the plugin's README.md (rendered by us as markdown — no
 // plugin code runs here).
 function PluginHelp({ p, onBack }: { p: PluginInfo; onBack: () => void }) {
+  const t = useT();
   const [md, setMd] = React.useState<string | null>(null);
   React.useEffect(() => {
     let alive = true;
-    api.getPluginReadme(p.id).then((t) => { if (alive) setMd(t ?? ''); });
+    api.getPluginReadme(p.id).then((content) => { if (alive) setMd(content ?? ''); });
     return () => { alive = false; };
   }, [p.id]);
   return (
     <section className="plugin-subpage">
       <div className="plugin-subhead">
-        <button className="secondary" onClick={onBack}>← Back</button>
-        <h3>{p.name} · help</h3>
+        <button className="secondary" onClick={onBack}>{t('settings.plugins.back')}</button>
+        <h3>{t('settings.plugins.helpPageTitle', { name: p.name })}</h3>
       </div>
-      {md === null && <p className="note">Loading…</p>}
-      {md === '' && <p className="note">This plugin has no README.md.</p>}
+      {md === null && <p className="note">{t('settings.plugins.loading')}</p>}
+      {md === '' && <p className="note">{t('settings.plugins.noReadme')}</p>}
       {md && <div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(md) }} />}
     </section>
   );
@@ -539,13 +560,14 @@ function renderMarkdown(src: string): string {
 }
 
 function About() {
+  const t = useT();
   return (
     <section className="about">
-      <h3>wumpiary</h3>
-      <p>A home for many Wumpuses. Runs multiple Discord accounts at once — each in its own isolated, persistent session — so notifications from every account arrive together.</p>
-      <p>It loads the genuine Discord web client and observes only; it never automates accounts or modifies Discord.</p>
-      <h3>Security</h3>
-      <p>Your PIN gates an encrypted vault (scrypt + AES-256-GCM, bound to the OS keychain where available). This protects against casual local access — not a determined attacker with full disk access to a running session.</p>
+      <h3>{t('settings.about.brand')}</h3>
+      <p>{t('settings.about.p1')}</p>
+      <p>{t('settings.about.p2')}</p>
+      <h3>{t('settings.about.security')}</h3>
+      <p>{t('settings.about.securityNote')}</p>
     </section>
   );
 }

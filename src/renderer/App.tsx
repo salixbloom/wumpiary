@@ -3,9 +3,11 @@ import { api, useStore } from './store';
 import { Sidebar } from './Sidebar';
 import { LockScreen } from './LockScreen';
 import { Settings, SettingsTab } from './Settings';
+import { useT } from './i18n';
 import type { ShareSource } from '../shared/types';
 
 export function App() {
+  const t = useT();
   const state = useStore((s) => s.state);
   const [tab, setTab] = useState<SettingsTab | null>(null);
   const [settingsAccount, setSettingsAccount] = useState<string | null>(null);
@@ -64,8 +66,8 @@ export function App() {
     api.setOverlay(tab !== null || autofillId !== null || shareSources !== null);
   }, [tab, autofillId, shareSources]);
 
-  if (!state) return <AppFrame themeFade={themeFade}><div className="loading">Loading...</div></AppFrame>;
-  if (state.locked) return <AppFrame themeFade={themeFade}><LockScreen hasVault={state.hasVault} encryptionAvailable={state.encryptionAvailable} /></AppFrame>;
+  if (!state) return <AppFrame themeFade={themeFade} t={t}><div className="loading">{t('app.loading')}</div></AppFrame>;
+  if (state.locked) return <AppFrame themeFade={themeFade} t={t}><LockScreen hasVault={state.hasVault} encryptionAvailable={state.encryptionAvailable} locale={state.config.ui.locale} /></AppFrame>;
 
   const side = state.config.ui.sidebarSide;
   const sidebar = (
@@ -77,7 +79,7 @@ export function App() {
   );
 
   return (
-    <AppFrame themeFade={themeFade}>
+    <AppFrame themeFade={themeFade} t={t}>
       <div className={`app side-${side}`}>
         {side === 'left' && sidebar}
         <div className="stage">{!state.activeId && <EmptyState hasAccounts={state.config.accountsOrder.length > 0} />}</div>
@@ -180,7 +182,7 @@ function shellVarsEqual(a: ShellVars, b: ShellVars) {
   );
 }
 
-function AppFrame({ children, themeFade }: { children: React.ReactNode; themeFade: { id: number; vars: ShellVars } | null }) {
+function AppFrame({ children, themeFade, t }: { children: React.ReactNode; themeFade: { id: number; vars: ShellVars } | null; t: (key: string) => string }) {
   const frameStyle = themeFade ? ({
     '--old-app-frame-background': themeFade.vars.appFrameBackground,
     '--old-shell-bg-2': themeFade.vars.bg2,
@@ -191,11 +193,11 @@ function AppFrame({ children, themeFade }: { children: React.ReactNode; themeFad
   return (
     <div className={`app-frame ${fadeClass}`} style={frameStyle}>
       <div className="titlebar">
-        <div className="titlebar-brand">wumpiary</div>
+        <div className="titlebar-brand">{t('app.brand')}</div>
         <div className="window-controls">
-          <button title="Minimize" aria-label="Minimize" onClick={() => api.minimizeWindow()}><MinusIcon /></button>
-          <button title="Maximize or restore" aria-label="Maximize or restore" onClick={() => api.toggleMaximizeWindow()}><WindowIcon /></button>
-          <button className="close" title="Close" aria-label="Close" onClick={() => api.closeWindow()}><CloseIcon /></button>
+          <button title={t('window.minimize')} aria-label={t('window.minimize')} onClick={() => api.minimizeWindow()}><MinusIcon /></button>
+          <button title={t('window.maximize')} aria-label={t('window.maximize')} onClick={() => api.toggleMaximizeWindow()}><WindowIcon /></button>
+          <button className="close" title={t('window.close')} aria-label={t('window.close')} onClick={() => api.closeWindow()}><CloseIcon /></button>
         </div>
       </div>
       <div className="app-body">{children}</div>
@@ -228,6 +230,7 @@ function CloseIcon() {
 }
 
 function AutofillModal({ nickname, accountId, onClose }: { nickname: string; accountId: string; onClose: () => void }) {
+  const t = useT();
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -241,19 +244,19 @@ function AutofillModal({ nickname, accountId, onClose }: { nickname: string; acc
     setBusy(false);
     setPin('');
     if (r.ok) onClose();
-    else setError(r.error === 'wrong-pin' ? 'Incorrect PIN.' : 'No saved password for this account.');
+    else setError(r.error === 'wrong-pin' ? t('autofill.error.wrongPin') : t('autofill.error.noPassword'));
   };
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <form className="pin-modal" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h3>Sign in to {nickname}</h3>
-        <p className="note">Enter your PIN to autofill the login. You will still solve any captcha / 2FA and click Log In yourself.</p>
-        <input type="password" autoFocus inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value)} />
+        <h3>{t('autofill.title', { nickname })}</h3>
+        <p className="note">{t('autofill.hint')}</p>
+        <input type="password" autoFocus inputMode="numeric" placeholder={t('autofill.pin')} value={pin} onChange={(e) => setPin(e.target.value)} />
         {error && <p className="pin-error">{error}</p>}
         <div className="pin-actions">
-          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="primary" disabled={!pin || busy}>{busy ? 'Filling...' : 'Autofill'}</button>
+          <button type="button" className="secondary" onClick={onClose}>{t('autofill.cancel')}</button>
+          <button type="submit" className="primary" disabled={!pin || busy}>{busy ? t('autofill.filling') : t('autofill.fill')}</button>
         </div>
       </form>
     </div>
@@ -261,25 +264,26 @@ function AutofillModal({ nickname, accountId, onClose }: { nickname: string; acc
 }
 
 function SourcePicker({ sources, onPick }: { sources: ShareSource[]; onPick: (id: string | null) => void }) {
+  const t = useT();
   const screens = sources.filter((s) => s.type === 'screen');
   const windows = sources.filter((s) => s.type === 'window');
   return (
     <div className="modal-backdrop" onMouseDown={() => onPick(null)}>
       <div className="share-picker" onMouseDown={(e) => e.stopPropagation()}>
         <div className="share-head">
-          <h3>Share your screen</h3>
-          <button className="modal-close" onClick={() => onPick(null)}>Cancel ✕</button>
+          <h3>{t('share.title')}</h3>
+          <button className="modal-close" onClick={() => onPick(null)}>{t('share.cancel')}</button>
         </div>
         <div className="share-body">
-          {screens.length > 0 && <div className="share-group">Screens</div>}
+          {screens.length > 0 && <div className="share-group">{t('share.screens')}</div>}
           <div className="share-grid">
             {screens.map((s) => <SourceTile key={s.id} source={s} onPick={onPick} />)}
           </div>
-          {windows.length > 0 && <div className="share-group">Applications</div>}
+          {windows.length > 0 && <div className="share-group">{t('share.apps')}</div>}
           <div className="share-grid">
             {windows.map((s) => <SourceTile key={s.id} source={s} onPick={onPick} />)}
           </div>
-          {sources.length === 0 && <p className="note">No screens or windows available to share.</p>}
+          {sources.length === 0 && <p className="note">{t('share.empty')}</p>}
         </div>
       </div>
     </div>
@@ -299,16 +303,17 @@ function SourceTile({ source, onPick }: { source: ShareSource; onPick: (id: stri
 }
 
 function EmptyState({ hasAccounts }: { hasAccounts: boolean }) {
+  const t = useT();
   return (
     <div className="empty">
       <div className="empty-logo" />
-      <h1>wumpiary</h1>
+      <h1>{t('app.brand')}</h1>
       {hasAccounts ? (
-        <p>No account selected - pick one from the sidebar, or wake a hibernated account.</p>
+        <p>{t('empty.noAccount')}</p>
       ) : (
         <>
-          <p>Run all your Discord accounts at once, each connected and notifying in the background.</p>
-          <button className="primary" onClick={() => api.addAccount()}>Add your first account</button>
+          <p>{t('empty.intro')}</p>
+          <button className="primary" onClick={() => api.addAccount()}>{t('empty.addFirst')}</button>
         </>
       )}
     </div>

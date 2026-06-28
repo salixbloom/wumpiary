@@ -29,6 +29,7 @@ export const IPC = {
   windowToggleMaximize: 'window:toggleMaximize',
   windowClose: 'window:close',
   clearActivity: 'activity:clear',
+  setLocale: 'settings:setLocale',
 
   // renderer -> main (saved login / autofill)
   saveLogin: 'login:save',

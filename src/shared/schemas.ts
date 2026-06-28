@@ -31,6 +31,7 @@ const PluginPermissionEnum = z.enum([
   'discord-view',
   'network',
   'files',
+  'filesystem',
   'clipboard',
   'hotkeys',
 ]);
@@ -83,6 +84,7 @@ const UiPatch = z
     sidebarWidth: z.number().int().min(64).max(1024),
     theme: Theme,
     accent: Hex,
+    locale: z.string().min(1).max(32),
   })
   .partial()
   .strict();
@@ -95,6 +97,7 @@ const GlobalPatch = z
     startMinimized: z.boolean(),
     autoLockMinutes: z.number().int().min(0).max(1440),
     autoHibernateMinutes: z.number().int().min(0).max(1440),
+    pluginStorageMb: z.number().int().min(1).max(500),
     pushToTalk: z
       .object({
         enabled: z.boolean(),
@@ -141,6 +144,7 @@ export const RendererSchemas = {
   windowToggleMaximize: z.tuple([]),
   windowClose: z.tuple([]),
   clearActivity: z.tuple([]),
+  setLocale: z.tuple([z.string().min(1).max(32)]),
   saveLogin: z.tuple([AccountId, z.string().max(320), z.string().max(512), z.string().min(1).max(256)]), // accountId, email, password, pin
   clearLogin: z.tuple([AccountId]),
   autofillLogin: z.tuple([AccountId, z.string().min(1).max(256)]), // accountId, pin
@@ -229,13 +233,15 @@ export const ObserverSchemas = {
     z.object({ accountId: AccountId, active: z.boolean() }).strip(),
   ]),
   // discord-view content script -> main: a broadcast to the plugin's other
-  // contexts. Least-trusted surface (runs in the Discord page), so plugin id /
-  // channel are clamped and `data` is treated as untrusted by recipients.
+  // contexts. Least-trusted surface (runs in the Discord page), so the sending
+  // plugin is identified by the per-plugin relay key main injected into its
+  // isolated world (NOT a plugin id the page can forge); channel is clamped and
+  // `data` is treated as untrusted by recipients.
   obPluginMsg: z.tuple([
     z
       .object({
         accountId: AccountId,
-        pluginId: z.string().max(64),
+        relayKey: z.string().max(64),
         channel: z.string().max(120),
         data: z.unknown(),
       })
