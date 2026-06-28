@@ -63,8 +63,27 @@ function contentRuntime(accountId: string, pluginId: string, relayKey: string): 
       focusMessageBox: () => { const b = findBox(); if (b) b.focus(); return !!b; },
       type: (text) => {
         const b = findBox(); if (!b) return false; b.focus();
-        if (b.isContentEditable) { document.execCommand('insertText', false, String(text)); }
-        else { setNative(b, (b.value || '') + String(text)); b.dispatchEvent(new Event('input', { bubbles: true })); }
+        const s = String(text);
+        if (b.isContentEditable) {
+          // Discord's chatbox is a Slate (React) editor: text inserted via
+          // execCommand mutates the DOM but often doesn't update Slate's internal
+          // model, so the message looks typed but sends empty. Dispatch a paste
+          // event carrying a CONSTRUCTED DataTransfer (never the real OS
+          // clipboard) — Slate's paste handler reads it and updates state
+          // correctly. Fall back to execCommand if the editor ignores the paste.
+          let handled = false;
+          try {
+            const dt = new DataTransfer();
+            dt.setData('text/plain', s);
+            const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+            b.dispatchEvent(ev);
+            handled = ev.defaultPrevented;
+          } catch (e) { handled = false; }
+          if (!handled) document.execCommand('insertText', false, s);
+        } else {
+          setNative(b, (b.value || '') + s);
+          b.dispatchEvent(new Event('input', { bubbles: true }));
+        }
         return true;
       },
       send: () => {
