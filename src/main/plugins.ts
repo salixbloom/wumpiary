@@ -1,6 +1,9 @@
-import { app, BrowserWindow, WebContentsView, Notification, clipboard, dialog, globalShortcut, net, protocol, shell } from 'electron';
+import { app, BrowserWindow, WebContentsView, Notification, dialog, globalShortcut, net, protocol, shell, webContents } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as dns from 'dns';
+import { isIP } from 'net';
+import { randomUUID } from 'crypto';
 import { pathToFileURL } from 'url';
 import { IPC } from '../shared/ipc';
 import { PluginManifestSchema } from '../shared/schemas';
@@ -11,13 +14,16 @@ import { ALL_PERMISSIONS, PluginInfo, PluginManifest, PluginMetadata, PluginPerm
 // panels), the Discord-view content scripts, and the validated bridge between
 // every plugin context and the rest of the app.
 //
-// Trust model: plugin JS always runs sandboxed with no Node. The headless host
-// is CSP-locked with no network; UI surfaces load the plugin's own files from a
-// per-plugin origin (wumpiary-plugin://<id>/) and only reach the network if the
-// plugin was granted `network`. EVERY outbound effect a plugin asks for is
-// RE-CHECKED here against its granted permissions before it happens, and the
-// plugin id behind a UI call is derived from the sender, never trusted from the
-// message. This is the real boundary; the per-context gating is convenience.
+// Trust model: plugin JS always runs sandboxed with no Node. Each enabled
+// headless plugin gets its OWN hidden host window (CSP-locked, no network);
+// UI surfaces load the plugin's own files from a per-plugin origin
+// (wumpiary-plugin://<id>/) and only reach the network if the plugin was granted
+// `network`. EVERY outbound effect a plugin asks for is RE-CHECKED here against
+// its granted permissions before it happens, and the plugin id behind EVERY call
+// — host or UI — is derived from the IPC sender, never trusted from the message.
+// Because no two plugins share a context, one plugin can neither impersonate
+// another (to borrow its permissions) nor read another's storage. This is the
+// real boundary; the per-context gating is convenience.
 
 interface DiscoveredPlugin {
   manifest: PluginManifest;
@@ -41,6 +47,10 @@ const CALL_PERM: Record<string, PluginPermission | ''> = {
   'window.open': '', 'window.close': '',
   notify: 'notifications',
   setDiscordCss: 'discord-css',
+  // Clipboard is fire-only — it triggers the OS copy/paste action on the focused
+  // field and returns nothing, so a plugin can never read clipboard/selection
+  // contents (no readText). Both are PH_CALL for that reason.
+  'clipboard.copy': 'clipboard', 'clipboard.paste': 'clipboard',
   'hotkeys.unregister': 'hotkeys',
 };
 // Request/response methods (ipc PH_INVOKE) → required permission.
@@ -49,12 +59,21 @@ const INVOKE_PERM: Record<string, PluginPermission | ''> = {
   getAccounts: 'accounts',
   http: 'network',
   'files.save': 'files', 'files.open': 'files',
-  'clipboard.writeText': 'clipboard', 'clipboard.readText': 'clipboard',
+  'fs.read': 'filesystem', 'fs.write': 'filesystem', 'fs.delete': 'filesystem',
+  'fs.list': 'filesystem', 'fs.stat': 'filesystem',
   'hotkeys.register': 'hotkeys',
 };
 
 const MAX_HTTP_BYTES = 250 * 1024 * 1024;
 const MAX_FILE_BYTES = 250 * 1024 * 1024;
+// Per-plugin caps to keep a misbehaving/malicious plugin from wedging the main
+// process. Storage is bounded (quota is user-configurable, see
+// deps.getStorageLimitBytes) so a plugin can't fill the disk; bridge calls are
+// rate-limited so a tight loop can't flood main with IPC; concurrent outbound
+// http is capped so a plugin can't open unbounded sockets.
+const RATE_WINDOW_MS = 1000;
+const RATE_MAX_CALLS = 200; // bridge messages per plugin per window
+const MAX_HTTP_CONCURRENCY = 8;
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -79,27 +98,58 @@ export interface PluginDeps {
   dispatchToContent: (pluginId: string, msg: unknown, exceptAccountId?: string) => void;
   /** Re-evaluate which content scripts should be injected into Discord views. */
   reinjectContent: () => void;
+  /** Forward raw keyboard input from a plugin window so global Push-to-Talk
+   *  keeps working while that window holds focus (it otherwise eats the keys). */
+  forwardInput: (input: Electron.Input) => void;
+  /** User-configured per-plugin storage quota, in bytes. */
+  getStorageLimitBytes: () => number;
 }
 
 export class PluginManager {
   private dir = path.join(app.getPath('userData'), 'plugins');
   private dataDir = path.join(app.getPath('userData'), 'plugin-data');
+  // Contained per-plugin file folders for the `filesystem` permission.
+  private fsDir = path.join(app.getPath('userData'), 'plugin-fs');
   private permsPath = path.join(this.dir, 'permissions.json');
 
   private discovered = new Map<string, DiscoveredPlugin>();
   private perms: PermsFile = {};
   private discordCss = new Map<string, string>();
 
-  private host: BrowserWindow | null = null;
-  private hostReady = false;
+  // One hidden headless host PER plugin (keyed by plugin id), so the IPC sender
+  // uniquely identifies the plugin behind every message.
+  private hosts = new Map<string, { win: BrowserWindow; ready: boolean }>();
+  private hostsStarted = false; // hosts only spin up after the user has unlocked
 
   // UI surfaces, keyed by plugin id.
   private windows = new Map<string, BrowserWindow>();
   private panels = new Map<string, WebContentsView>();
   // webContents id -> the plugin context behind it (for authoritative id resolution).
-  private uiCtx = new Map<number, { pluginId: string; kind: 'window' | 'panel' }>();
+  private uiCtx = new Map<number, { pluginId: string; kind: 'host' | 'window' | 'panel' }>();
   // pluginId -> registered global-shortcut accelerators (for cleanup).
   private hotkeys = new Map<string, Set<string>>();
+
+  // ---- per-plugin resource accounting -----------------------------------
+  // In-memory storage cache (debounced to disk), with a dirty set + flush timer.
+  private storageCache = new Map<string, Record<string, unknown>>();
+  private storageDirty = new Set<string>();
+  private storageTimer: NodeJS.Timeout | null = null;
+  // Sliding-window IPC rate limiter, keyed by webContents id (one context = one plugin).
+  private rate = new Map<number, { count: number; resetAt: number }>();
+  // In-flight outbound http requests per plugin.
+  private httpInflight = new Map<string, number>();
+  // Cached byte usage of each plugin's contained `filesystem` folder (scanned
+  // lazily once, then kept current on every write/delete).
+  private fsUsage = new Map<string, number>();
+  // Per-plugin secret tag authenticating content-script broadcasts (relayKey ->
+  // pluginId and the reverse). A content script proves which plugin it is by
+  // echoing the key main injected into its isolated world; it cannot read
+  // another plugin's key out of its own world's scope, so it cannot broadcast as
+  // another plugin. (Residual: a second, separately-malicious discord-view
+  // plugin could observe the shared postMessage bus to learn the key — narrow,
+  // and far weaker than the old "claim any id" path.)
+  private contentKey = new Map<string, string>(); // pluginId -> relayKey
+  private keyOwner = new Map<string, string>(); // relayKey -> pluginId
 
   constructor(
     private hostPreloadPath: string,
@@ -112,6 +162,7 @@ export class PluginManager {
   init() {
     try { fs.mkdirSync(this.dir, { recursive: true }); } catch { /* ignore */ }
     try { fs.mkdirSync(this.dataDir, { recursive: true }); } catch { /* ignore */ }
+    try { fs.mkdirSync(this.fsDir, { recursive: true }); } catch { /* ignore */ }
     this.registerProtocol();
     this.seedBundled();
     this.perms = this.readPerms();
@@ -282,18 +333,89 @@ export class PluginManager {
   }
 
   // ---- plugin-scoped storage --------------------------------------------
+  // Backed by an in-memory cache and flushed to disk on a short debounce, so a
+  // plugin spamming storage.set() can't block the main thread on synchronous
+  // writes. Total size per plugin is capped (MAX_STORAGE_BYTES) so it can't fill
+  // the disk.
   private storagePath(id: string) { return path.join(this.dataDir, `${id}.json`); }
   private readStorage(id: string): Record<string, unknown> {
-    try { return JSON.parse(fs.readFileSync(this.storagePath(id), 'utf8')); } catch { return {}; }
+    let data = this.storageCache.get(id);
+    if (!data) {
+      try { data = JSON.parse(fs.readFileSync(this.storagePath(id), 'utf8')) as Record<string, unknown>; } catch { data = {}; }
+      this.storageCache.set(id, data);
+    }
+    return data;
   }
-  private writeStorage(id: string, data: Record<string, unknown>) {
-    try { fs.writeFileSync(this.storagePath(id), JSON.stringify(data)); } catch (e) { console.error('[plugins] storage write failed', id, e); }
+  /** Serialized byte size of a plugin's key/value storage. */
+  private kvBytes(id: string): number {
+    try { return Buffer.byteLength(JSON.stringify(this.readStorage(id))); } catch { return 0; }
   }
 
-  // ---- headless host window ----------------------------------------------
+  /** Apply a mutation to a plugin's storage, enforcing the (user-configured)
+   *  size cap. The cap is the plugin's TOTAL on-disk budget — key/value storage
+   *  plus its contained `filesystem` folder — so the slider is one clear knob.
+   *  Returns false (and rolls back) if the result would exceed it. */
+  private mutateStorage(id: string, fn: (data: Record<string, unknown>) => void): boolean {
+    const data = this.readStorage(id);
+    const before = JSON.stringify(data);
+    fn(data);
+    try {
+      if (Buffer.byteLength(JSON.stringify(data)) + this.fsUsed(id) > this.deps.getStorageLimitBytes()) {
+        this.storageCache.set(id, JSON.parse(before)); // roll back
+        console.warn('[plugins] storage quota exceeded, write dropped', id);
+        return false;
+      }
+    } catch { /* circular/oversized — fall through to flush attempt */ }
+    this.storageDirty.add(id);
+    this.scheduleStorageFlush();
+    return true;
+  }
+  private scheduleStorageFlush() {
+    if (this.storageTimer) return;
+    this.storageTimer = setTimeout(() => {
+      this.storageTimer = null;
+      for (const id of this.storageDirty) {
+        const data = this.storageCache.get(id) ?? {};
+        fs.promises.writeFile(this.storagePath(id), JSON.stringify(data)).catch((e) => console.error('[plugins] storage write failed', id, e));
+      }
+      this.storageDirty.clear();
+    }, 250);
+  }
+  private flushStorageNow() {
+    if (this.storageTimer) { clearTimeout(this.storageTimer); this.storageTimer = null; }
+    for (const id of this.storageDirty) {
+      try { fs.writeFileSync(this.storagePath(id), JSON.stringify(this.storageCache.get(id) ?? {})); } catch (e) { console.error('[plugins] storage flush failed', id, e); }
+    }
+    this.storageDirty.clear();
+  }
+
+  // ---- headless host windows (one per plugin) ----------------------------
+  /** Called once the user unlocks. From here on the set of host windows is kept
+   *  in sync with the set of enabled headless plugins. */
   startHost() {
-    if (this.host) { this.reloadHost(); return; }
-    this.host = new BrowserWindow({
+    this.hostsStarted = true;
+    this.syncHosts();
+  }
+
+  /** Headless plugins = enabled plugins that ship an entry script. Create a host
+   *  for each, tear down hosts whose plugin was disabled/removed, and refresh the
+   *  load of any already-running host (perms/storage may have changed). */
+  private syncHosts() {
+    if (!this.hostsStarted) return;
+    const want = new Set(
+      [...this.discovered.values()].filter((d) => this.isEnabled(d.manifest.id) && d.code).map((d) => d.manifest.id),
+    );
+    for (const id of [...this.hosts.keys()]) if (!want.has(id)) this.destroyHost(id);
+    for (const id of want) {
+      const h = this.hosts.get(id);
+      if (!h) this.createHost(id);
+      else if (h.ready) this.sendLoadTo(id); // refresh perms/storage in a live host
+    }
+    this.recomputeCss();
+  }
+
+  private createHost(id: string) {
+    const win = new BrowserWindow({
       show: false,
       webPreferences: {
         preload: this.hostPreloadPath,
@@ -303,62 +425,89 @@ export class PluginManager {
         backgroundThrottling: false,
       },
     });
-    this.host.webContents.on('console-message', (_e, level, msg) => { if (level >= 2) console.warn('[plugin-host]', msg); });
+    const h = { win, ready: false };
+    this.hosts.set(id, h);
+    this.uiCtx.set(win.webContents.id, { pluginId: id, kind: 'host' });
+    win.webContents.on('console-message', (_e, level, msg) => { if (level >= 2) console.warn(`[plugin-host:${id}]`, msg); });
     const html = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-eval' 'unsafe-inline'; connect-src 'none'"><title>wumpiary plugin host</title>`;
-    this.hostReady = false;
-    this.host.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch((e) => console.error('[plugins] host load failed', e));
-    this.host.on('closed', () => { this.host = null; this.hostReady = false; });
+    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch((e) => console.error('[plugins] host load failed', id, e));
+    win.on('closed', () => { this.uiCtx.delete(win.webContents.id); this.hosts.delete(id); });
   }
 
-  /** Headless plugins = enabled plugins that ship an entry script. */
-  private sendLoad() {
-    if (!this.host || this.host.isDestroyed()) return;
-    const payload = [...this.discovered.values()]
-      .filter((d) => this.isEnabled(d.manifest.id) && d.code)
-      .map((d) => ({
-        id: d.manifest.id,
-        code: d.code as string,
-        perms: (d.manifest.permissions ?? []).filter((p) => this.granted(d.manifest.id, p)),
-        storage: this.readStorage(d.manifest.id),
-      }));
-    this.host.webContents.send(IPC.phMsg, { t: 'load', plugins: payload });
-    this.recomputeCss();
+  private destroyHost(id: string) {
+    const h = this.hosts.get(id);
+    if (!h) return;
+    this.uiCtx.delete(h.win.webContents.id);
+    this.rate.delete(h.win.webContents.id);
+    this.httpInflight.delete(id);
+    this.hosts.delete(id);
+    if (!h.win.isDestroyed()) h.win.destroy();
+  }
+
+  private sendLoadTo(id: string) {
+    const h = this.hosts.get(id);
+    const d = this.discovered.get(id);
+    if (!h || !h.ready || h.win.isDestroyed() || !d || !d.code) return;
+    h.win.webContents.send(IPC.phMsg, {
+      t: 'load',
+      id,
+      code: d.code,
+      perms: (d.manifest.permissions ?? []).filter((p) => this.granted(id, p)),
+      storage: this.readStorage(id),
+    });
   }
 
   private reloadHost() {
-    if (this.host && this.hostReady) this.sendLoad();
+    this.syncHosts();
     // UI surfaces and content scripts must reflect new enabled/permission state too.
     this.refreshUiPerms();
     this.deps.reinjectContent();
   }
 
-  isHostSender(sender: Electron.WebContents): boolean {
-    return !!this.host && !this.host.isDestroyed() && sender === this.host.webContents;
+  /** webContents of a plugin's ready host, or null. */
+  private hostWcFor(id: string): Electron.WebContents | null {
+    const h = this.hosts.get(id);
+    return h && h.ready && !h.win.isDestroyed() ? h.win.webContents : null;
   }
 
   // ---- sender → plugin id resolution ------------------------------------
-  /** Resolve the authoritative plugin id behind an IPC sender. For the shared
-   *  host, trust the message's id (one context, many plugins). For a UI surface,
-   *  derive it from the sender and ignore whatever the message claims. */
-  private resolvePlugin(sender: Electron.WebContents, claimed: string | undefined): string | null {
-    if (this.isHostSender(sender)) return claimed && this.isEnabled(claimed) ? claimed : null;
+  /** Resolve the authoritative plugin id behind an IPC sender. Every plugin
+   *  context — headless host, window, or panel — is a single-plugin context
+   *  registered in uiCtx, so the id is derived from the sender and any id the
+   *  message claims is ignored entirely. */
+  private resolvePlugin(sender: Electron.WebContents): string | null {
     const ctx = this.uiCtx.get(sender.id);
     if (ctx && this.isEnabled(ctx.pluginId)) return ctx.pluginId;
     return null;
   }
 
+  /** Sliding-window rate limit, keyed by the calling context's webContents id.
+   *  Returns false once a plugin exceeds RATE_MAX_CALLS within RATE_WINDOW_MS. */
+  private rateOk(sender: Electron.WebContents): boolean {
+    const now = Date.now();
+    const e = this.rate.get(sender.id);
+    if (!e || now >= e.resetAt) { this.rate.set(sender.id, { count: 1, resetAt: now + RATE_WINDOW_MS }); return true; }
+    if (e.count >= RATE_MAX_CALLS) return false;
+    e.count += 1;
+    return true;
+  }
+
   // ---- fire-and-forget calls (PH_CALL) ----------------------------------
   handleHostCall(sender: Electron.WebContents, raw: unknown) {
-    const m = raw as { t: string; pluginId?: string; method?: string; args?: unknown[]; message?: string };
-    if (m.t === 'ready') { if (this.isHostSender(sender)) { this.hostReady = true; this.sendLoad(); } return; }
+    const m = raw as { t: string; method?: string; args?: unknown[]; message?: string };
+    if (m.t === 'ready') {
+      const ctx = this.uiCtx.get(sender.id);
+      if (ctx && ctx.kind === 'host') { const h = this.hosts.get(ctx.pluginId); if (h) { h.ready = true; this.sendLoadTo(ctx.pluginId); } }
+      return;
+    }
+    const id = this.resolvePlugin(sender);
+    if (!id) return;
     if (m.t === 'error') {
-      const id = this.resolvePlugin(sender, m.pluginId);
-      if (id) { const d = this.discovered.get(id); if (d) { d.error = `runtime error: ${m.message}`; this.deps.onChange(); } }
+      const d = this.discovered.get(id); if (d) { d.error = `runtime error: ${m.message}`; this.deps.onChange(); }
       return;
     }
     if (m.t !== 'call' || !m.method) return;
-    const id = this.resolvePlugin(sender, m.pluginId);
-    if (!id) return;
+    if (!this.rateOk(sender)) return;
     const need = CALL_PERM[m.method];
     if (need === undefined) return; // unknown method
     if (need && !this.granted(id, need)) return;
@@ -368,15 +517,13 @@ export class PluginManager {
       case 'log':
         console.log(`[plugin:${id}]`, ...(args as unknown[]).map(String));
         break;
-      case 'storageSet': { const [k, v] = args as [string, unknown]; const data = this.readStorage(id); data[k] = v; this.writeStorage(id, data); break; }
-      case 'storageDelete': { const [k] = args as [string]; const data = this.readStorage(id); delete data[k]; this.writeStorage(id, data); break; }
+      case 'storageSet': { const [k, v] = args as [string, unknown]; this.mutateStorage(id, (data) => { data[String(k)] = v; }); break; }
+      case 'storageDelete': { const [k] = args as [string]; this.mutateStorage(id, (data) => { delete data[String(k)]; }); break; }
       case 'broadcast': { const [channel, data] = args as [string, unknown]; this.deliverBroadcast(id, String(channel), data, sender.id); break; }
-      case 'notify': {
-        const o = (args[0] ?? {}) as { title?: string; body?: string };
-        try { new Notification({ title: String(o.title ?? '').slice(0, 200), body: String(o.body ?? '').slice(0, 1000) }).show(); } catch { /* ignore */ }
-        break;
-      }
+      case 'notify': this.doNotify(id, args[0]); break;
       case 'setDiscordCss': { this.discordCss.set(id, String(args[0] ?? '')); this.recomputeCss(); break; }
+      case 'clipboard.copy': this.fireClipboard('copy'); break;
+      case 'clipboard.paste': this.fireClipboard('paste'); break;
       case 'window.open': this.openWindow(id); break;
       case 'window.close': this.closeWindow(id); break;
       case 'hotkeys.unregister': this.unregisterHotkey(id, String(args[0] ?? '')); break;
@@ -385,10 +532,11 @@ export class PluginManager {
 
   // ---- request/response calls (PH_INVOKE) -------------------------------
   async handleHostInvoke(sender: Electron.WebContents, raw: unknown): Promise<unknown> {
-    const m = raw as { pluginId?: string; method?: string; args?: unknown[] };
+    const m = raw as { method?: string; args?: unknown[] };
     if (!m.method) return { error: 'bad-request' };
-    const id = this.resolvePlugin(sender, m.pluginId);
+    const id = this.resolvePlugin(sender);
     if (!id) return { error: 'not-allowed' };
+    if (!this.rateOk(sender)) return { error: 'rate-limited' };
     const need = INVOKE_PERM[m.method];
     if (need === undefined) return { error: 'unknown-method' };
     if (need && !this.granted(id, need)) return { error: 'permission-denied' };
@@ -399,11 +547,14 @@ export class PluginManager {
         case 'storageGet': return this.readStorage(id)[args[0] as string];
         case 'storageAll': return this.readStorage(id);
         case 'getAccounts': return this.deps.getAccounts();
-        case 'http': return await this.doHttp(args[0]);
+        case 'http': return await this.doHttp(id, args[0]);
         case 'files.save': return await this.doFileSave(args[0]);
         case 'files.open': return await this.doFileOpen(args[0]);
-        case 'clipboard.writeText': clipboard.writeText(String(args[0] ?? '')); return { ok: true };
-        case 'clipboard.readText': return clipboard.readText();
+        case 'fs.read': return await this.doFsRead(id, args[0]);
+        case 'fs.write': return await this.doFsWrite(id, args[0], args[1]);
+        case 'fs.delete': return await this.doFsDelete(id, args[0]);
+        case 'fs.list': return await this.doFsList(id, args[0]);
+        case 'fs.stat': return await this.doFsStat(id, args[0]);
         case 'hotkeys.register': return this.registerHotkey(id, String(args[0] ?? ''));
       }
     } catch (e) {
@@ -412,20 +563,57 @@ export class PluginManager {
     return { error: 'unknown-method' };
   }
 
-  private async doHttp(req: unknown): Promise<unknown> {
+  /** Post a desktop notification on a plugin's behalf. The ORIGIN (the plugin's
+   *  name, read from its on-disk manifest — never anything the plugin supplies)
+   *  is shown as the title so the user always knows which plugin spoke; the
+   *  plugin's own title/body go in the body. */
+  private doNotify(id: string, arg: unknown) {
+    const o = (arg ?? {}) as { title?: string; body?: string };
+    const d = this.discovered.get(id);
+    const origin = (d?.manifest.name || id).slice(0, 120);
+    const body = [String(o.title ?? ''), String(o.body ?? '')].filter(Boolean).join(' — ').slice(0, 1000);
+    try { new Notification({ title: origin, body }).show(); } catch { /* ignore */ }
+  }
+
+  /** Fire the OS copy/paste action on whatever field currently has focus — which
+   *  may be a Discord account view, a plugin window, or the chrome UI. This
+   *  exposes NO data to the plugin: it only triggers the same action the user's
+   *  Ctrl/Cmd+C / +V would, on whatever they currently have focused. */
+  private fireClipboard(kind: 'copy' | 'paste') {
+    const wc = webContents.getAllWebContents().find((w) => !w.isDestroyed() && w.isFocused())
+      ?? (BrowserWindow.getFocusedWindow() ?? this.getOwnerWindow())?.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    if (kind === 'copy') wc.copy(); else wc.paste();
+  }
+
+  private async doHttp(id: string, req: unknown): Promise<unknown> {
     const r = (req ?? {}) as { url?: string; method?: string; headers?: Record<string, string>; body?: string | Uint8Array };
     const url = String(r.url ?? '');
     if (!/^https?:\/\//i.test(url)) return { error: 'only http(s) urls allowed' };
-    const res = await net.fetch(url, {
-      method: r.method || 'GET',
-      headers: r.headers || {},
-      body: r.body as BodyInit | undefined,
-    });
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if (buf.byteLength > MAX_HTTP_BYTES) return { error: 'response too large' };
-    const headers: Record<string, string> = {};
-    res.headers.forEach((v, k) => { headers[k] = v; });
-    return { ok: res.ok, status: res.status, headers, contentType: res.headers.get('content-type') || '', body: buf };
+    let host: string;
+    try { host = new URL(url).hostname; } catch { return { error: 'invalid url' }; }
+    // SSRF guard: refuse to let a plugin reach loopback / private / link-local
+    // (incl. the 169.254.169.254 cloud-metadata IP) addresses. (Residual: this
+    // validates the initial host; a redirect or DNS rebind to an internal
+    // address afterwards is not re-checked.)
+    if (await isBlockedHost(host)) return { error: 'destination not allowed' };
+    const inflight = this.httpInflight.get(id) ?? 0;
+    if (inflight >= MAX_HTTP_CONCURRENCY) return { error: 'too many concurrent requests' };
+    this.httpInflight.set(id, inflight + 1);
+    try {
+      const res = await net.fetch(url, {
+        method: r.method || 'GET',
+        headers: r.headers || {},
+        body: r.body as BodyInit | undefined,
+      });
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (buf.byteLength > MAX_HTTP_BYTES) return { error: 'response too large' };
+      const headers: Record<string, string> = {};
+      res.headers.forEach((v, k) => { headers[k] = v; });
+      return { ok: res.ok, status: res.status, headers, contentType: res.headers.get('content-type') || '', body: buf };
+    } finally {
+      this.httpInflight.set(id, (this.httpInflight.get(id) ?? 1) - 1);
+    }
   }
 
   private async doFileSave(arg: unknown): Promise<unknown> {
@@ -453,6 +641,85 @@ export class PluginManager {
       files.push({ name: path.basename(fp), size: stat.size, data });
     }
     return { ok: true, files };
+  }
+
+  // ---- contained per-plugin filesystem (`filesystem` permission) ---------
+  /** Resolve a plugin-relative path inside its private folder, or null if it
+   *  escapes (absolute paths, `..`, etc. are rejected). */
+  private fsResolve(id: string, rel: unknown): string | null {
+    const base = path.join(this.fsDir, id);
+    const p = path.resolve(base, String(rel ?? ''));
+    if (p !== base && !p.startsWith(base + path.sep)) return null;
+    return p;
+  }
+  /** Current byte usage of a plugin's folder (scanned once, then maintained). */
+  private fsUsed(id: string): number {
+    let u = this.fsUsage.get(id);
+    if (u === undefined) { u = dirSize(path.join(this.fsDir, id)); this.fsUsage.set(id, u); }
+    return u;
+  }
+
+  private async doFsWrite(id: string, rel: unknown, data: unknown): Promise<unknown> {
+    const target = this.fsResolve(id, rel);
+    if (!target) return { error: 'invalid path' };
+    const buf = data instanceof Uint8Array ? Buffer.from(data) : Buffer.from(String(data ?? ''), 'utf8');
+    let prev = 0;
+    try { prev = (await fs.promises.stat(target)).size; } catch { /* new file */ }
+    // Counts against the same per-plugin budget as key/value storage.
+    if (this.kvBytes(id) + this.fsUsed(id) - prev + buf.byteLength > this.deps.getStorageLimitBytes()) {
+      return { error: 'quota-exceeded' };
+    }
+    await fs.promises.mkdir(path.dirname(target), { recursive: true });
+    await fs.promises.writeFile(target, buf);
+    this.fsUsage.set(id, Math.max(0, this.fsUsed(id) - prev + buf.byteLength));
+    return { ok: true, size: buf.byteLength };
+  }
+
+  private async doFsRead(id: string, rel: unknown): Promise<unknown> {
+    const target = this.fsResolve(id, rel);
+    if (!target) return { error: 'invalid path' };
+    try {
+      const stat = await fs.promises.stat(target);
+      if (!stat.isFile()) return { error: 'not a file' };
+      return { ok: true, data: new Uint8Array(await fs.promises.readFile(target)) };
+    } catch { return { error: 'not found' }; }
+  }
+
+  private async doFsDelete(id: string, rel: unknown): Promise<unknown> {
+    const target = this.fsResolve(id, rel);
+    if (!target) return { error: 'invalid path' };
+    // Never allow deleting the plugin's root via an empty path.
+    if (target === path.join(this.fsDir, id)) return { error: 'invalid path' };
+    try {
+      const stat = await fs.promises.stat(target);
+      const freed = stat.isFile() ? stat.size : dirSize(target);
+      await fs.promises.rm(target, { recursive: true, force: true });
+      this.fsUsage.set(id, Math.max(0, this.fsUsed(id) - freed));
+    } catch { /* already gone */ }
+    return { ok: true };
+  }
+
+  private async doFsList(id: string, rel: unknown): Promise<unknown> {
+    const target = this.fsResolve(id, rel);
+    if (!target) return { error: 'invalid path' };
+    try {
+      const entries = await fs.promises.readdir(target, { withFileTypes: true });
+      const files = await Promise.all(entries.map(async (e) => {
+        let size = 0;
+        if (e.isFile()) { try { size = (await fs.promises.stat(path.join(target, e.name))).size; } catch { /* ignore */ } }
+        return { name: e.name, dir: e.isDirectory(), size };
+      }));
+      return { ok: true, files };
+    } catch { return { ok: true, files: [] }; }
+  }
+
+  private async doFsStat(id: string, rel: unknown): Promise<unknown> {
+    const target = this.fsResolve(id, rel);
+    if (!target) return { error: 'invalid path' };
+    try {
+      const s = await fs.promises.stat(target);
+      return { ok: true, exists: true, dir: s.isDirectory(), size: s.isFile() ? s.size : 0 };
+    } catch { return { ok: true, exists: false }; }
   }
 
   private registerHotkey(id: string, accel: string): boolean {
@@ -508,8 +775,12 @@ export class PluginManager {
     this.windows.set(id, w);
     this.uiCtx.set(w.webContents.id, { pluginId: id, kind: 'window' });
     w.webContents.on('console-message', (_e, level, msg) => { if (level >= 2) console.warn(`[plugin-win:${id}]`, msg); });
+    // A focused plugin window swallows keystrokes that would otherwise reach the
+    // chrome/account views, breaking the keyboard-fallback path for Push-to-Talk.
+    // Mirror those views by forwarding raw input to the same global handler.
+    w.webContents.on('before-input-event', (_e, input) => this.deps.forwardInput(input));
     w.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith('http')) shell.openExternal(url); return { action: 'deny' }; });
-    w.on('closed', () => { this.uiCtx.delete(w.webContents.id); this.windows.delete(id); });
+    w.on('closed', () => { this.uiCtx.delete(w.webContents.id); this.rate.delete(w.webContents.id); this.windows.delete(id); });
     w.once('ready-to-show', () => w.show());
     w.loadURL(`wumpiary-plugin://${id}/${win.entry}`).catch((e) => console.error('[plugins] window load failed', id, e));
   }
@@ -560,6 +831,7 @@ export class PluginManager {
     if (!view) return;
     if (owner && !owner.isDestroyed()) owner.contentView.removeChildView(view);
     this.uiCtx.delete(view.webContents.id);
+    this.rate.delete(view.webContents.id);
     try { view.webContents.close(); } catch { /* ignore */ }
     this.panels.delete(id);
   }
@@ -587,30 +859,48 @@ export class PluginManager {
 
   /** Deliver a named event to a single plugin's host + UI contexts. */
   private deliverEvent(id: string, name: string, payload: unknown) {
-    if (this.host && this.hostReady) this.host.webContents.send(IPC.phMsg, { t: 'event', name, payload, targets: [id] });
+    const host = this.hostWcFor(id);
+    if (host) host.send(IPC.phMsg, { t: 'event', name, payload });
     for (const wc of this.uiContextsFor(id)) wc.send(IPC.phMsg, { t: 'event', name, payload });
   }
 
   /** Fan a broadcast out to every context of the plugin except the originator. */
   private deliverBroadcast(id: string, channel: string, data: unknown, exceptWcId?: number, exceptAccountId?: string) {
-    if (this.host && this.hostReady && this.host.webContents.id !== exceptWcId) {
-      this.host.webContents.send(IPC.phMsg, { t: 'broadcast', pluginId: id, channel, data });
-    }
+    const host = this.hostWcFor(id);
+    if (host && host.id !== exceptWcId) host.send(IPC.phMsg, { t: 'broadcast', channel, data });
     for (const wc of this.uiContextsFor(id)) if (wc.id !== exceptWcId) wc.send(IPC.phMsg, { t: 'broadcast', channel, data });
     this.deps.dispatchToContent(id, { t: 'broadcast', channel, data }, exceptAccountId);
   }
 
-  /** Content script (Discord view) broadcasting to the plugin's other contexts. */
-  handleContentMsg(p: { accountId: string; pluginId: string; channel: string; data: unknown }) {
-    if (!this.isEnabled(p.pluginId) || !this.granted(p.pluginId, 'discord-view')) return;
-    this.deliverBroadcast(p.pluginId, String(p.channel), p.data, undefined, p.accountId);
+  /** Content script (Discord view) broadcasting to the plugin's other contexts.
+   *  The sender proves its identity by echoing the per-plugin relay key main
+   *  injected into its isolated world — the claimed plugin id is derived from
+   *  that key, never trusted from the message, so a content script cannot
+   *  broadcast as a different plugin. */
+  handleContentMsg(p: { accountId: string; relayKey: string; channel: string; data: unknown }) {
+    const id = this.keyOwner.get(p.relayKey);
+    if (!id || !this.isEnabled(id) || !this.granted(id, 'discord-view')) return;
+    this.deliverBroadcast(id, String(p.channel), p.data, undefined, p.accountId);
   }
 
-  /** Content scripts to inject into each Discord view (enabled + discord-view granted). */
-  getContentScripts(): { pluginId: string; code: string }[] {
+  /** Stable per-plugin relay key authenticating its content-script broadcasts. */
+  private relayKeyFor(id: string): string {
+    let k = this.contentKey.get(id);
+    if (!k) { k = randomUUID(); this.contentKey.set(id, k); this.keyOwner.set(k, id); }
+    return k;
+  }
+  private dropRelayKey(id: string) {
+    const k = this.contentKey.get(id);
+    if (k) this.keyOwner.delete(k);
+    this.contentKey.delete(id);
+  }
+
+  /** Content scripts to inject into each Discord view (enabled + discord-view
+   *  granted). Each carries a relay key so its broadcasts can be authenticated. */
+  getContentScripts(): { pluginId: string; code: string; relayKey: string }[] {
     return [...this.discovered.values()]
       .filter((d) => this.isEnabled(d.manifest.id) && d.contentScript && this.granted(d.manifest.id, 'discord-view'))
-      .map((d) => ({ pluginId: d.manifest.id, code: d.contentScript as string }));
+      .map((d) => ({ pluginId: d.manifest.id, code: d.contentScript as string, relayKey: this.relayKeyFor(d.manifest.id) }));
   }
 
   private recomputeCss() {
@@ -626,9 +916,10 @@ export class PluginManager {
   }
 
   emitNotification(payload: unknown) {
-    if (!this.host || !this.hostReady) return;
-    const targets = this.targetsFor('notifications');
-    if (targets.length) this.host.webContents.send(IPC.phMsg, { t: 'event', name: 'notification', payload, targets });
+    for (const id of this.targetsFor('notifications')) {
+      const host = this.hostWcFor(id);
+      if (host) host.send(IPC.phMsg, { t: 'event', name: 'notification', payload });
+    }
     // also deliver to notification-granted plugins' UI contexts
     for (const id of new Set([...this.windows.keys(), ...this.panels.keys()])) {
       if (this.isEnabled(id) && this.granted(id, 'notifications')) for (const wc of this.uiContextsFor(id)) wc.send(IPC.phMsg, { t: 'event', name: 'notification', payload });
@@ -636,9 +927,9 @@ export class PluginManager {
   }
 
   emitAccounts(snapshot: unknown[]) {
-    if (this.host && this.hostReady) {
-      const targets = this.targetsFor('accounts');
-      if (targets.length) this.host.webContents.send(IPC.phMsg, { t: 'accounts', snapshot, targets });
+    for (const id of this.targetsFor('accounts')) {
+      const host = this.hostWcFor(id);
+      if (host) host.send(IPC.phMsg, { t: 'accounts', snapshot });
     }
     for (const id of new Set([...this.windows.keys(), ...this.panels.keys()])) {
       if (this.isEnabled(id) && this.granted(id, 'accounts')) for (const wc of this.uiContextsFor(id)) wc.send(IPC.phMsg, { t: 'accounts', snapshot });
@@ -649,7 +940,7 @@ export class PluginManager {
   setEnabled(id: string, on: boolean) {
     if (!this.perms[id]) this.perms[id] = { enabled: false, permissions: {} };
     this.perms[id].enabled = on;
-    if (!on) { this.discordCss.delete(id); this.clearHotkeys(id); }
+    if (!on) { this.discordCss.delete(id); this.clearHotkeys(id); this.dropRelayKey(id); }
     this.writePerms();
     this.reloadHost();
     this.recomputeCss();
@@ -661,6 +952,7 @@ export class PluginManager {
     this.perms[id].permissions[perm] = granted ? 'granted' : 'denied';
     if (perm === 'discord-css' && !granted) this.discordCss.delete(id);
     if (perm === 'hotkeys' && !granted) this.clearHotkeys(id);
+    if (perm === 'discord-view' && !granted) this.dropRelayKey(id);
     this.writePerms();
     this.reloadHost();
     this.recomputeCss();
@@ -671,9 +963,10 @@ export class PluginManager {
     for (const id of [...this.windows.keys()]) this.closeWindow(id);
     for (const id of [...this.panels.keys()]) this.closePanel(id);
     for (const id of [...this.hotkeys.keys()]) this.clearHotkeys(id);
+    for (const id of [...this.hosts.keys()]) this.destroyHost(id); // recreate fresh against new code
     this.discover();
     this.discordCss.clear();
-    if (this.host && this.hostReady) this.sendLoad();
+    this.syncHosts();
     this.recomputeCss();
     this.deps.reinjectContent();
     this.deps.onChange();
@@ -682,11 +975,69 @@ export class PluginManager {
   openFolder() { shell.openPath(this.dir).catch(() => undefined); }
 
   destroy() {
+    this.flushStorageNow();
     for (const w of this.windows.values()) if (!w.isDestroyed()) w.destroy();
     this.windows.clear();
     this.panels.clear();
     for (const id of [...this.hotkeys.keys()]) this.clearHotkeys(id);
-    if (this.host && !this.host.isDestroyed()) this.host.destroy();
-    this.host = null;
+    for (const id of [...this.hosts.keys()]) this.destroyHost(id);
   }
+}
+
+/** Total byte size of a directory tree (metadata-only stat walk). */
+function dirSize(dir: string): number {
+  let total = 0;
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return 0; }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) total += dirSize(p);
+    else { try { total += fs.statSync(p).size; } catch { /* ignore */ } }
+  }
+  return total;
+}
+
+// ---- SSRF guard ----------------------------------------------------------
+/** True if a host should not be reachable by plugin http: loopback, private,
+ *  link-local (incl. 169.254.169.254 cloud metadata), CGNAT and other reserved
+ *  ranges. Hostnames are resolved and every resolved address is checked. */
+async function isBlockedHost(host: string): Promise<boolean> {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  const fam = isIP(h);
+  if (fam) return isPrivateAddr(h, fam);
+  try {
+    const addrs = await dns.promises.lookup(h, { all: true });
+    if (!addrs.length) return true;
+    return addrs.some((a) => isPrivateAddr(a.address, a.family));
+  } catch {
+    return true; // unresolvable → don't fetch
+  }
+}
+
+function isPrivateAddr(addr: string, family: number): boolean {
+  if (family === 4) return isPrivateV4(addr);
+  const a = addr.toLowerCase();
+  if (a === '::1' || a === '::') return true;
+  if (a.startsWith('fc') || a.startsWith('fd')) return true; // fc00::/7 unique-local
+  if (a.startsWith('fe8') || a.startsWith('fe9') || a.startsWith('fea') || a.startsWith('feb')) return true; // fe80::/10 link-local
+  const mapped = a.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/); // IPv4-mapped
+  if (mapped) return isPrivateV4(mapped[1]);
+  return false;
+}
+
+function isPrivateV4(addr: string): boolean {
+  const o = addr.split('.').map((n) => parseInt(n, 10));
+  if (o.length !== 4 || o.some((n) => Number.isNaN(n))) return true;
+  const [a, b] = o;
+  if (a === 0 || a === 127) return true; // this-host / loopback
+  if (a === 10) return true; // private
+  if (a === 172 && b >= 16 && b <= 31) return true; // private
+  if (a === 192 && b === 168) return true; // private
+  if (a === 169 && b === 254) return true; // link-local + metadata
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+  if (a === 192 && b === 0) return true; // 192.0.0.0/24 + 192.0.2.0/24
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+  if (a >= 224) return true; // multicast + reserved + 255.255.255.255
+  return false;
 }

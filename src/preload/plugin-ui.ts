@@ -63,7 +63,18 @@ if (has('notifications')) api.notify = (o: { title?: string; body?: string }) =>
 if (has('discord-css')) api.setDiscordCss = (css: string) => send('setDiscordCss', [String(css ?? '')]);
 if (has('network')) api.http = (req: unknown) => invoke('http', [req]);
 if (has('files')) api.files = { save: (o: unknown) => invoke('files.save', [o]), open: (o: unknown) => invoke('files.open', [o]) };
-if (has('clipboard')) api.clipboard = { writeText: (s: string) => invoke('clipboard.writeText', [String(s ?? '')]), readText: () => invoke('clipboard.readText', []) };
+// Contained, app-managed private folder (no native dialogs, no access to the
+// user's real files). Paths are relative to the plugin's own folder.
+if (has('filesystem')) api.fs = {
+  read: (p: string) => invoke('fs.read', [String(p ?? '')]),
+  write: (p: string, data: unknown) => invoke('fs.write', [String(p ?? ''), data]),
+  delete: (p: string) => invoke('fs.delete', [String(p ?? '')]),
+  list: (p?: string) => invoke('fs.list', [String(p ?? '')]),
+  stat: (p: string) => invoke('fs.stat', [String(p ?? '')]),
+};
+// Clipboard is fire-only: a plugin can trigger the OS copy/paste action on the
+// focused field but can never READ clipboard or selection contents.
+if (has('clipboard')) api.clipboard = { copy: () => send('clipboard.copy', []), paste: () => send('clipboard.paste', []) };
 if (has('hotkeys')) api.hotkeys = { register: (accel: string) => invoke('hotkeys.register', [String(accel ?? '')]), unregister: (accel: string) => send('hotkeys.unregister', [String(accel ?? '')]) };
 
 contextBridge.exposeInMainWorld('wumpiary', api);

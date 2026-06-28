@@ -387,9 +387,11 @@ window.addEventListener('message', (e: MessageEvent) => {
     ipcRenderer.send(IPC.obCall, { accountId, active: !!d.active });
   } else if (d.__wumpPlugin === 'broadcast') {
     // A `discord-view` plugin's content script broadcasting to its other
-    // contexts. Least-trusted surface; main re-checks the plugin is enabled +
-    // granted and treats the data as untrusted.
-    ipcRenderer.send(IPC.obPluginMsg, { accountId, pluginId: String(d.pluginId ?? ''), channel: String(d.channel ?? ''), data: d.data });
+    // contexts. Least-trusted surface; the sending plugin is identified by the
+    // relay key (`k`) main injected into its isolated world, not by anything the
+    // page can claim. Main re-checks the plugin is enabled + granted and treats
+    // the data as untrusted.
+    ipcRenderer.send(IPC.obPluginMsg, { accountId, relayKey: String(d.k ?? ''), channel: String(d.channel ?? ''), data: d.data });
   } else if (d.__wumpPlugin === 'error') {
     console.warn('[plugin-content]', d.pluginId, d.message);
   }

@@ -26,17 +26,27 @@ html.wump-ptt-held [class*="panels_"] [class*="avatar_"],
 html.wump-ptt-held [class*="avatarWrapper_"] [class*="avatar_"] { ${PTT_RING} }
 `;
 
-// Per-view runtime for `discord-view` plugin content scripts. Injected (once
-// per page) into each Discord view's MAIN world via executeJavaScript so it can
-// touch the page DOM. It runs each granted plugin's content script with a
-// curated `wumpiary` object and relays broadcasts out via window.postMessage,
-// which account-observer (isolated world) forwards to main. main -> content
-// delivery calls window.__wumpPluginRT.dispatch(...) by executeJavaScript.
-// This is the explicit, user-granted, off-by-default exception to observe-only.
-function contentRuntime(accountId: string): string {
+// Per-plugin runtime for `discord-view` plugin content scripts. Each plugin's
+// content script is injected into its OWN isolated world (not Discord's main
+// world), so it gets DOM access but can NOT reach Discord's page JavaScript —
+// its webpack modules, internal stores, or the auth token in memory — and can
+// not reach another plugin's world. It runs the plugin's code with a curated
+// `wumpiary` object and relays broadcasts out via window.postMessage tagged with
+// the per-plugin relay KEY (so main can authenticate which plugin sent it and a
+// script can't broadcast as another plugin). account-observer (its own isolated
+// world) forwards those to main; main -> content delivery calls
+// window.__wumpRT.dispatch(...) in this plugin's world. This is the explicit,
+// user-granted, off-by-default exception to observe-only.
+//
+// NOTE: an isolated world still shares the DOM, so this permission inherently
+// lets a plugin read visible page content (DMs, messages) and the page's
+// localStorage — that is the point of discord-view. What it no longer grants is
+// access to Discord's in-memory JS (the token), or to sibling plugins.
+function contentRuntime(accountId: string, pluginId: string, relayKey: string): string {
   return `(() => {
-  if (window.__wumpPluginRT) return;
   const ACCOUNT_ID = ${JSON.stringify(accountId)};
+  const PLUGIN_ID = ${JSON.stringify(pluginId)};
+  const RELAY_KEY = ${JSON.stringify(relayKey)};
   const post = (m) => { try { window.postMessage(m, '*'); } catch (e) {} };
   const findBox = () =>
     document.querySelector('[role="textbox"][contenteditable="true"]') ||
@@ -69,13 +79,13 @@ function contentRuntime(accountId: string): string {
       wait: (ms) => new Promise((r) => setTimeout(r, Math.max(0, Math.min(60000, ms | 0)))),
     };
   }
-  function makeApi(pluginId) {
+  function makeApi() {
     const handlers = {};
     return {
       handlers,
       api: {
         accountId: ACCOUNT_ID,
-        pluginId: pluginId,
+        pluginId: PLUGIN_ID,
         query: (sel) => document.querySelector(sel),
         queryAll: (sel) => Array.prototype.slice.call(document.querySelectorAll(sel)),
         onMutation: (cb) => {
@@ -91,43 +101,46 @@ function contentRuntime(accountId: string): string {
         },
         hide: (el) => { if (el && el.classList) el.classList.add('wump-hidden'); },
         reveal: (el) => { if (el && el.classList) el.classList.remove('wump-hidden'); },
-        log: function () { try { console.log('[content:' + pluginId + ']', ...arguments); } catch (e) {} },
-        broadcast: (channel, data) => post({ __wumpPlugin: 'broadcast', pluginId: pluginId, channel: String(channel), data: data }),
+        log: function () { try { console.log('[content:' + PLUGIN_ID + ']', ...arguments); } catch (e) {} },
+        broadcast: (channel, data) => post({ __wumpPlugin: 'broadcast', k: RELAY_KEY, channel: String(channel), data: data }),
         on: (name, cb) => { (handlers[name] || (handlers[name] = new Set())).add(cb); return () => handlers[name] && handlers[name].delete(cb); },
         input: makeInput(),
       },
     };
   }
+  // One plugin per world, so RT tracks a single built instance.
   const RT = {
-    plugins: {},
-    run: function (pluginId, code) {
-      this.stop(pluginId);
+    built: null,
+    run: function (code) {
+      this.stop();
       try {
-        const built = makeApi(pluginId);
+        const built = makeApi();
         // eslint-disable-next-line no-new-func
-        const fn = new Function('wumpiary', code + '\\n//# sourceURL=wumpiary-content/' + pluginId);
+        const fn = new Function('wumpiary', code + '\\n//# sourceURL=wumpiary-content/' + PLUGIN_ID);
         built.cleanup = fn(built.api);
-        this.plugins[pluginId] = built;
-      } catch (e) { post({ __wumpPlugin: 'error', pluginId: pluginId, message: String((e && e.message) || e) }); }
+        this.built = built;
+      } catch (e) { post({ __wumpPlugin: 'error', pluginId: PLUGIN_ID, message: String((e && e.message) || e) }); }
     },
-    stop: function (pluginId) {
-      const p = this.plugins[pluginId];
+    stop: function () {
+      const p = this.built;
       if (p && typeof p.cleanup === 'function') { try { p.cleanup(); } catch (e) {} }
-      delete this.plugins[pluginId];
+      this.built = null;
     },
-    stopAll: function () { for (const id in this.plugins) this.stop(id); },
-    dispatch: function (pluginId, msg) {
-      const p = this.plugins[pluginId]; if (!p) return;
+    dispatch: function (msg) {
+      const p = this.built; if (!p) return;
       if (msg && msg.t === 'broadcast') {
         const set = p.handlers['message:' + msg.channel]; if (!set) return;
         set.forEach((cb) => { try { cb(msg.data); } catch (e) {} });
       }
     },
   };
-  const st = document.createElement('style');
-  st.textContent = '.wump-hidden{display:none !important;}';
-  (document.head || document.documentElement).appendChild(st);
-  window.__wumpPluginRT = RT;
+  if (!document.getElementById('wump-hidden-style')) {
+    const st = document.createElement('style');
+    st.id = 'wump-hidden-style';
+    st.textContent = '.wump-hidden{display:none !important;}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+  window.__wumpRT = RT;
 })();`;
 }
 
@@ -154,10 +167,16 @@ export class AccountManager {
   private cssKeys = new Map<string, string>(); // viewId -> insertCSS handle
   private pttEnabled = false;
   private pttPressed = false;
-  /** Supplies the content scripts (plugin id + source) to inject into every
-   *  Discord view — only enabled plugins granted `discord-view`. Set by the
+  /** Supplies the content scripts (plugin id + source + relay key) to inject into
+   *  every Discord view — only enabled plugins granted `discord-view`. Set by the
    *  controller after the PluginManager is constructed. */
-  private contentScripts?: () => { pluginId: string; code: string }[];
+  private contentScripts?: () => { pluginId: string; code: string; relayKey: string }[];
+  /** Stable isolated-world id per plugin (same id reused across views/reinjects
+   *  so dispatch can target a plugin's world). */
+  private contentWorldIds = new Map<string, number>();
+  private nextWorldId = 1000;
+  /** accountId -> plugin ids currently injected in that view (to stop removed ones). */
+  private injectedContent = new Map<string, Set<string>>();
 
   constructor(
     private win: BrowserWindow,
@@ -469,18 +488,37 @@ export class AccountManager {
 
   // ---- discord-view plugin content scripts -------------------------------
   /** Wire the provider that lists which content scripts to inject (set once at startup). */
-  setContentScripts(fn: () => { pluginId: string; code: string }[]) { this.contentScripts = fn; }
+  setContentScripts(fn: () => { pluginId: string; code: string; relayKey: string }[]) { this.contentScripts = fn; }
 
-  private injectContentScripts(id: string, wc: Electron.WebContents) {
+  /** Stable isolated-world id for a plugin's content script. */
+  private worldIdFor(pluginId: string): number {
+    let w = this.contentWorldIds.get(pluginId);
+    if (w === undefined) { w = this.nextWorldId++; this.contentWorldIds.set(pluginId, w); }
+    return w;
+  }
+
+  private injectContentScripts(accountId: string, wc: Electron.WebContents) {
     const scripts = this.contentScripts?.() ?? [];
-    wc.executeJavaScript(contentRuntime(id))
-      .then(() => wc.executeJavaScript('window.__wumpPluginRT && window.__wumpPluginRT.stopAll()'))
-      .then(() => {
-        for (const s of scripts) {
-          wc.executeJavaScript(`window.__wumpPluginRT && window.__wumpPluginRT.run(${JSON.stringify(s.pluginId)}, ${JSON.stringify(s.code)})`).catch(() => undefined);
+    const want = new Set(scripts.map((s) => s.pluginId));
+    // Stop content scripts for plugins no longer present in this view's world set.
+    const prev = this.injectedContent.get(accountId);
+    if (prev) {
+      for (const pid of prev) {
+        if (!want.has(pid)) {
+          wc.executeJavaScriptInIsolatedWorld(this.worldIdFor(pid), [{ code: 'window.__wumpRT && window.__wumpRT.stop()' }]).catch(() => undefined);
         }
-      })
-      .catch(() => undefined);
+      }
+    }
+    this.injectedContent.set(accountId, want);
+    // Each plugin runs in its OWN isolated world (no access to Discord's page JS
+    // or to other plugins). The runtime is (re)installed fresh so the relay key
+    // is current, then the plugin's code is run inside it.
+    for (const s of scripts) {
+      const world = this.worldIdFor(s.pluginId);
+      wc.executeJavaScriptInIsolatedWorld(world, [{ code: contentRuntime(accountId, s.pluginId, s.relayKey) }])
+        .then(() => wc.executeJavaScriptInIsolatedWorld(world, [{ code: `window.__wumpRT && window.__wumpRT.run(${JSON.stringify(s.code)})` }]))
+        .catch(() => undefined);
+    }
   }
 
   /** Re-evaluate content scripts in every live view (enable/permission/reload changes). */
@@ -493,11 +531,13 @@ export class AccountManager {
 
   /** Deliver a broadcast/event from main into a plugin's content scripts. */
   dispatchToContentScripts(pluginId: string, msg: unknown, exceptAccountId?: string) {
+    const world = this.contentWorldIds.get(pluginId);
+    if (world === undefined) return;
     for (const [id, view] of this.views) {
       if (id === exceptAccountId) continue;
       const wc = view.webContents;
       if (wc.isDestroyed()) continue;
-      wc.executeJavaScript(`window.__wumpPluginRT && window.__wumpPluginRT.dispatch(${JSON.stringify(pluginId)}, ${JSON.stringify(msg)})`).catch(() => undefined);
+      wc.executeJavaScriptInIsolatedWorld(world, [{ code: `window.__wumpRT && window.__wumpRT.dispatch(${JSON.stringify(msg)})` }]).catch(() => undefined);
     }
   }
 

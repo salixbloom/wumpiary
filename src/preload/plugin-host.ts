@@ -1,14 +1,20 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron';
 
-// Sandboxed preload for the hidden plugin-host window — the shared context where
-// every enabled plugin's HEADLESS code (its `entry` script) runs. It does NOT
-// run plugin code itself (that would expose ipcRenderer); instead it exposes a
-// tiny message bridge to the page's main world and injects a runtime there.
-// Plugin code runs entirely in the main world, which — thanks to the host page's
-// CSP (connect-src 'none', no remote origins) — has no network and no Node. The
-// only thing a plugin can reach is the curated `wumpiary` API the runtime builds
-// for it, every outbound effect of which is re-validated against the plugin's
-// granted permissions back in the main process (see src/main/plugins.ts).
+// Sandboxed preload for a hidden plugin-host window. There is now ONE host
+// window PER enabled headless plugin (not a single shared context), so the main
+// process can derive the authoritative plugin id from the IPC sender and never
+// has to trust an id carried in the message. That removes the old cross-plugin
+// impersonation hole where any plugin sharing the host realm could call the
+// bridge claiming another plugin's id and borrow its permissions / read its
+// storage. See src/main/plugins.ts.
+//
+// This preload does NOT run plugin code itself (that would expose ipcRenderer);
+// it exposes a tiny message bridge to the page's main world and injects a
+// runtime there that evaluates THIS host's single plugin. Plugin code runs in
+// the main world, which — thanks to the host page's CSP (connect-src 'none', no
+// remote origins) — has no network and no Node. The only thing it can reach is
+// the curated `wumpiary` API the runtime builds, every outbound effect of which
+// is re-validated against the plugin's granted permissions back in main.
 //
 // Channel names are inlined (not imported from ../shared/ipc) because a
 // sandboxed preload cannot pull in sibling chunks — same constraint as
@@ -33,6 +39,7 @@ ipcRenderer.on(PH_MSG, (_e, m) => deliver?.(m));
 // Authored as a normal function so it type-checks and reads naturally; it must
 // reference ONLY browser globals + window.__wumpBridge (no outer-scope
 // bindings) because it executes in a different world via executeJavaScript.
+// This host runs exactly ONE plugin, so there is no per-plugin routing here.
 function runtime() {
   const bridge = (window as unknown as {
     __wumpBridge: {
@@ -41,24 +48,25 @@ function runtime() {
       invoke: (m: unknown) => Promise<unknown>;
     };
   }).__wumpBridge;
-  interface Loaded {
-    handlers: Record<string, Set<(p: unknown) => void>>;
-    cleanup: unknown;
-  }
-  const plugins = new Map<string, Loaded>();
+
+  let pluginId = '';
+  let handlers: Record<string, Set<(p: unknown) => void>> = {};
+  let cleanup: unknown = null;
   let accounts: unknown[] = [];
 
-  function err(pluginId: string, e: unknown) {
-    bridge.send({ t: 'error', pluginId, message: String((e as { message?: string })?.message ?? e) });
+  function err(e: unknown) {
+    bridge.send({ t: 'error', message: String((e as { message?: string })?.message ?? e) });
   }
 
-  function makeApi(id: string, perms: string[], storage: Record<string, unknown>) {
-    const handlers: Record<string, Set<(p: unknown) => void>> = {};
+  function makeApi(perms: string[], storage: Record<string, unknown>) {
+    handlers = {};
     const has = (p: string) => perms.indexOf(p) !== -1;
-    const call = (method: string, args: unknown[]) => bridge.send({ t: 'call', pluginId: id, method, args });
-    const invoke = (method: string, args: unknown[]) => bridge.invoke({ t: 'invoke', pluginId: id, method, args });
+    // The id is informational only — main authenticates by IPC sender, so a
+    // forged id in an outbound message is ignored. We still send it for clarity.
+    const call = (method: string, args: unknown[]) => bridge.send({ t: 'call', method, args });
+    const invoke = (method: string, args: unknown[]) => bridge.invoke({ t: 'invoke', method, args });
     const api: Record<string, unknown> = {
-      id,
+      id: pluginId,
       on: (name: string, cb: (p: unknown) => void) => {
         (handlers[name] || (handlers[name] = new Set())).add(cb);
         return () => handlers[name] && handlers[name].delete(cb);
@@ -82,57 +90,60 @@ function runtime() {
     if (has('discord-css')) api.setDiscordCss = (css: string) => call('setDiscordCss', [String(css ?? '')]);
     if (has('network')) api.http = (req: unknown) => invoke('http', [req]);
     if (has('files')) api.files = { save: (o: unknown) => invoke('files.save', [o]), open: (o: unknown) => invoke('files.open', [o]) };
-    if (has('clipboard')) api.clipboard = { writeText: (s: string) => invoke('clipboard.writeText', [String(s ?? '')]), readText: () => invoke('clipboard.readText', []) };
+    // Contained, app-managed private folder (no native dialogs, no access to the
+    // user's real files). Paths are relative to the plugin's own folder.
+    if (has('filesystem')) api.fs = {
+      read: (p: string) => invoke('fs.read', [String(p ?? '')]),
+      write: (p: string, data: unknown) => invoke('fs.write', [String(p ?? ''), data]),
+      delete: (p: string) => invoke('fs.delete', [String(p ?? '')]),
+      list: (p?: string) => invoke('fs.list', [String(p ?? '')]),
+      stat: (p: string) => invoke('fs.stat', [String(p ?? '')]),
+    };
+    // Clipboard is fire-only: a plugin can trigger the OS copy/paste action on
+    // the focused field but can never READ clipboard or selection contents.
+    if (has('clipboard')) api.clipboard = { copy: () => call('clipboard.copy', []), paste: () => call('clipboard.paste', []) };
     if (has('hotkeys')) api.hotkeys = { register: (accel: string) => invoke('hotkeys.register', [String(accel ?? '')]), unregister: (accel: string) => call('hotkeys.unregister', [String(accel ?? '')]) };
-    return { api, handlers };
+    return api;
   }
 
   function unload() {
-    for (const [, p] of plugins) {
-      try { if (typeof p.cleanup === 'function') (p.cleanup as () => void)(); } catch { /* ignore */ }
-    }
-    plugins.clear();
+    try { if (typeof cleanup === 'function') (cleanup as () => void)(); } catch { /* ignore */ }
+    cleanup = null;
+    handlers = {};
   }
 
-  function load(list: Array<{ id: string; code: string; perms: string[]; storage: Record<string, unknown> }>) {
+  function load(p: { id: string; code: string; perms: string[]; storage: Record<string, unknown> }) {
     unload();
-    for (const p of list) {
-      try {
-        const { api, handlers } = makeApi(p.id, p.perms, p.storage || {});
-        const mod: { exports: unknown } = { exports: {} };
-        // eslint-disable-next-line no-new-func
-        const fn = new Function('module', 'exports', 'wumpiary', `${p.code}\n//# sourceURL=wumpiary-plugin/${p.id}`);
-        fn(mod, (mod as { exports: unknown }).exports, api);
-        const exp = mod.exports as { activate?: (a: unknown) => unknown } | ((a: unknown) => unknown);
-        const activate = typeof exp === 'function' ? exp : exp && exp.activate;
-        let cleanup: unknown = null;
-        if (typeof activate === 'function') cleanup = activate(api);
-        plugins.set(p.id, { handlers, cleanup });
-      } catch (e) {
-        err(p.id, e);
-      }
+    pluginId = p.id || '';
+    try {
+      const api = makeApi(p.perms || [], p.storage || {});
+      const mod: { exports: unknown } = { exports: {} };
+      // eslint-disable-next-line no-new-func
+      const fn = new Function('module', 'exports', 'wumpiary', `${p.code}\n//# sourceURL=wumpiary-plugin/${pluginId}`);
+      fn(mod, (mod as { exports: unknown }).exports, api);
+      const exp = mod.exports as { activate?: (a: unknown) => unknown } | ((a: unknown) => unknown);
+      const activate = typeof exp === 'function' ? exp : exp && exp.activate;
+      if (typeof activate === 'function') cleanup = activate(api);
+    } catch (e) {
+      err(e);
     }
   }
 
-  function dispatch(name: string, payload: unknown, targets: string[]) {
-    for (const id of targets) {
-      const p = plugins.get(id);
-      if (!p) continue;
-      const set = p.handlers[name];
-      if (!set) continue;
-      for (const cb of set) {
-        try { cb(payload); } catch (e) { err(id, e); }
-      }
+  function dispatch(name: string, payload: unknown) {
+    const set = handlers[name];
+    if (!set) return;
+    for (const cb of Array.from(set)) {
+      try { cb(payload); } catch (e) { err(e); }
     }
   }
 
   bridge.onMessage((raw: unknown) => {
     const m = raw as { t: string; [k: string]: unknown };
-    if (m.t === 'load') load(m.plugins as Array<{ id: string; code: string; perms: string[]; storage: Record<string, unknown> }>);
+    if (m.t === 'load') load(m as unknown as { id: string; code: string; perms: string[]; storage: Record<string, unknown> });
     else if (m.t === 'unload') unload();
-    else if (m.t === 'event') dispatch(m.name as string, m.payload, m.targets as string[]);
-    else if (m.t === 'accounts') { accounts = m.snapshot as unknown[]; dispatch('accounts', accounts, m.targets as string[]); }
-    else if (m.t === 'broadcast') dispatch('message:' + (m.channel as string), m.data, [m.pluginId as string]);
+    else if (m.t === 'event') dispatch(m.name as string, m.payload);
+    else if (m.t === 'accounts') { accounts = m.snapshot as unknown[]; dispatch('accounts', accounts); }
+    else if (m.t === 'broadcast') dispatch('message:' + (m.channel as string), m.data);
   });
 
   bridge.send({ t: 'ready' });

@@ -9,22 +9,31 @@
   .bar { -webkit-app-region: drag; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #1e1f22; }
   .bar b { font-size: 13px; }
   .bar .actions { -webkit-app-region: no-drag; display: flex; gap: 6px; }
-  .wrap { padding: 12px; }
+  .wrap { padding: 12px; max-height: calc(100vh - 41px); overflow: auto; }
   h4 { margin: 16px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #949ba4; }
   h4:first-child { margin-top: 0; }
   button { background: #4e5058; color: #fff; border: 0; border-radius: 6px; padding: 7px 11px; cursor: pointer; font-size: 13px; }
   button.primary { background: #5865f2; }
   button.ghost { background: transparent; color: #b5bac1; }
-  button:disabled { opacity: .5; cursor: default; }
+  button.icon { padding: 6px 8px; }
+  button:disabled { opacity: .4; cursor: default; }
   .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 200px; overflow: auto; }
   li { display: flex; align-items: center; gap: 8px; background: #1e1f22; border-radius: 6px; padding: 6px 8px; }
   li.active { outline: 1px solid #5865f2; }
   li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   li .idx { color: #80848e; width: 18px; text-align: right; }
+  li .x { background: transparent; color: #80848e; padding: 0 4px; font-size: 15px; }
+  li .x:hover { color: #f23f43; }
+  li .tag { font-size: 10px; color: #80848e; }
   .now { background: #1e1f22; border-radius: 8px; padding: 10px; margin-top: 6px; }
   .now .title { font-weight: 600; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  textarea { width: 100%; height: 64px; resize: none; background: #1e1f22; border: 1px solid #1e1f22; border-radius: 6px; color: #dbdee1; padding: 7px; font: 11px/1.4 ui-monospace, monospace; user-select: text; }
+  .vol { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .vol input[type=range] { flex: 1; accent-color: #5865f2; }
+  .vol .pct { width: 38px; text-align: right; color: #949ba4; font-size: 12px; font-variant-numeric: tabular-nums; }
+  input[type=text] { background: #1e1f22; border: 1px solid #1e1f22; border-radius: 6px; color: #dbdee1; padding: 6px 8px; font: 13px system-ui; user-select: text; }
+  input[type=text]:focus { outline: none; border-color: #5865f2; }
+  textarea { width: 100%; height: 56px; resize: none; background: #1e1f22; border: 1px solid #1e1f22; border-radius: 6px; color: #dbdee1; padding: 7px; font: 11px/1.4 ui-monospace, monospace; user-select: text; }
   textarea:focus { outline: none; border-color: #5865f2; }
   .hint { color: #949ba4; font-size: 12px; margin: 4px 0; }
   .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #4e5058; }
@@ -35,6 +44,13 @@
   .tabs button.on { background: #5865f2; }
   .seg { display: none; }
   .seg.on { display: block; }
+  .cfg label { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
+  .cfg input { accent-color: #5865f2; width: 15px; height: 15px; }
+  .hidden { display: none !important; }
+  .vote { background: #248046; }
+  .collapser { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .collapser .chev { font-size: 9px; color: #949ba4; }
+  .collapsed { display: none !important; }
 </style>
 </head>
 <body>
@@ -49,7 +65,13 @@
         <button id="prev">⏮</button>
         <button class="primary" id="play">▶</button>
         <button id="next">⏭</button>
+        <button id="vote" class="vote hidden">Vote skip <span id="voteCount"></span></button>
         <span id="peers" class="peers"></span>
+      </div>
+      <div class="vol">
+        <button id="mute" class="icon ghost" title="Mute">🔊</button>
+        <input id="vol" type="range" min="0" max="200" value="100" />
+        <span class="pct" id="volPct">100%</span>
       </div>
     </div>
 
@@ -57,14 +79,40 @@
     <div class="row"><button id="load">＋ Add tracks…</button><button class="ghost" id="clear">Clear</button></div>
     <ul id="queue"></ul>
 
+    <div id="usersWrap" class="hidden">
+      <h4>Connected (<span id="userCount">0</span>)</h4>
+      <ul id="users"></ul>
+    </div>
+
+    <div id="cfg" class="hidden">
+      <h4 id="cfgToggle" class="collapser">Session config <span class="chev" id="cfgChev">▸</span></h4>
+      <div id="cfgBody" class="collapsed">
+        <div class="row" style="margin:0 0 6px"><input id="selfName" type="text" placeholder="Your display name" style="flex:1" /></div>
+        <div class="cfg">
+          <label><input type="checkbox" id="cAllowPause" /> Allow participants to pause</label>
+          <label><input type="checkbox" id="cAllowSkip" /> Allow to skip</label>
+          <label><input type="checkbox" id="cAllowQueue" /> Allow to queue</label>
+          <label><input type="checkbox" id="cAllowRemove" /> Allow to remove</label>
+          <label><input type="checkbox" id="cVoteSkip" /> Vote skip</label>
+        </div>
+      </div>
+    </div>
+
     <h4>Listen together</h4>
+    <div id="nameJoin" class="row hidden" style="margin-bottom:6px"><input id="selfNameJoin" type="text" placeholder="Your display name" style="flex:1" /></div>
+
+    <p class="hint">Quick connect: post an invite into the Discord chat you have open — friends running this plugin see a Join button and their answer returns automatically (needs the <b>discord-view</b> permission).</p>
+    <div class="row" style="margin-bottom:10px"><button class="primary" id="discordInvite">📨 Invite via Discord</button> <span id="dcStatus" class="peers"></span></div>
+
+    <h4 id="manualToggle" class="collapser" style="margin-top:4px">Manual codes <span class="chev" id="manualChev">▸</span></h4>
+    <div id="manualBody" class="collapsed">
     <div class="tabs">
       <button id="tabHost" class="on">Host</button>
       <button id="tabJoin">Join</button>
     </div>
 
     <div id="segHost" class="seg on">
-      <p class="hint">Host the session, copy the invite code to a friend, then paste the answer they send back.</p>
+      <p class="hint">Create an invite per friend, send them the code, then paste the answer they send back. Repeat for more listeners.</p>
       <div class="row"><button class="primary" id="startHost">Create invite</button></div>
       <textarea id="hostInvite" placeholder="invite code appears here…" readonly></textarea>
       <textarea id="hostAnswer" placeholder="paste your friend's answer code here…"></textarea>
@@ -77,72 +125,427 @@
       <div class="row"><button class="primary" id="makeAnswer">Generate answer</button></div>
       <textarea id="joinAnswer" placeholder="answer code appears here…" readonly></textarea>
     </div>
+    </div><!-- /manualBody -->
   </div>
 
   <audio id="audio"></audio>
   <script>
     var w = window.wumpiary;
-    var audio = document.getElementById('audio');
-    var queue = [];        // [{ name, url }]
+    var $ = function (id) { return document.getElementById(id); };
+    var audio = $('audio');
+    var rnd = function () { return Math.random().toString(36).slice(2, 9); };
+    var rid = function () { return (Math.random().toString(36).slice(2) + '00000').slice(0, 6); };
+    var fmtName = function (n) { return n.replace(/\.[a-z0-9]+$/i, ''); };
+
+    // role: idle | hosting | joining | connected
+    var role = 'idle';
+    var queue = [];        // host/idle: [{id,name,url,temp}]; listener mirror: [{id,name}]
     var index = -1;
-    var pc = null, dc = null, role = 'idle';
+    var playing = false;
+    var selfName = 'Guest-' + rnd().slice(0, 4);
+
+    var config = { allowPause: false, allowSkip: false, allowQueue: false, allowRemove: false, voteSkip: false };
+
+    // host bookkeeping
+    var hostPeers = [];      // [{id,pc,dc,name,connected,rx}]
+    var awaiting = null;     // peer whose answer we're waiting to paste (manual flow)
+    var myInvites = {};      // inviteId -> host peer awaiting a Discord-relayed answer
+    var joinedInvites = {};  // inviteIds we've already answered as a listener
+    var votes = {};          // voterId -> true, for the current track
+    var temp = [];           // received files: {id,name,url,size,inQueue,evictAt}
+    var MAX_TEMP = 10;
+    var TEMP_GRACE = 5 * 60 * 1000;
+    var MAX_UPLOAD = 60 * 1024 * 1024;
+
+    // listener bookkeeping
+    var lpc = null, ldc = null;
+    var upload = null;       // in-flight upload: {resolve, file}
+
+    // ---- audio graph: stable stream for the host, gain for local volume ----
+    var actx = null, gain = null, streamDest = null, hostSrc = null;
+    function ensureActx() {
+      if (!actx) {
+        actx = new (window.AudioContext || window.webkitAudioContext)();
+        gain = actx.createGain();
+        gain.gain.value = sliderGain();
+        gain.connect(actx.destination);
+      }
+      if (actx.state === 'suspended') actx.resume();
+    }
+    // Host: route the <audio> element through a persistent MediaStreamDestination
+    // so every peer gets a live track immediately (captureStream() before a source
+    // is loaded yields an empty track — the old "listeners hear nothing" bug).
+    function hostStream() {
+      ensureActx();
+      if (!hostSrc) {
+        hostSrc = actx.createMediaElementSource(audio);
+        hostSrc.connect(gain);                 // local monitor (volume-controlled)
+        streamDest = actx.createMediaStreamDestination();
+        hostSrc.connect(streamDest);           // streamed at unity, ignores local volume
+      }
+      return streamDest;
+    }
+    // Listener: pump the remote track through a muted element (Chromium won't feed
+    // a remote MediaStream into WebAudio otherwise) and play it via the gain node.
+    function listenerPlay(stream) {
+      ensureActx();
+      audio.srcObject = stream;
+      audio.muted = true;
+      audio.play().catch(function () {});
+      var s = actx.createMediaStreamSource(stream);
+      s.connect(gain);
+    }
+
+    // ---- volume -----------------------------------------------------------
+    var lastVol = 100;
+    function sliderGain() { return (+$('vol').value) / 100; }
+    function applyVolume() {
+      var v = +$('vol').value;
+      $('volPct').textContent = v + '%';
+      if (gain) gain.gain.value = v / 100;
+      var b = $('mute');
+      b.textContent = v === 0 ? '🔇' : (v <= 100 ? '🔈' : '🔊');
+      b.title = v === 0 ? 'Unmute' : 'Mute';
+    }
+    $('vol').addEventListener('input', applyVolume);
+    $('mute').addEventListener('click', function () {
+      if (+$('vol').value === 0) { $('vol').value = lastVol || 100; }
+      else { lastVol = +$('vol').value; $('vol').value = 0; }
+      applyVolume();
+    });
+
+    // ---- name -------------------------------------------------------------
+    $('selfName').value = selfName;
+    $('selfNameJoin').value = selfName;
+    function onNameInput(e) {
+      selfName = e.target.value || selfName;
+      $('selfName').value = selfName; $('selfNameJoin').value = selfName;
+      if (role === 'hosting') pushState();
+      if (role === 'connected' && ldc && ldc.readyState === 'open') ldc.send(JSON.stringify({ t: 'hello', name: selfName }));
+    }
+    $('selfName').addEventListener('change', onNameInput);
+    $('selfNameJoin').addEventListener('change', onNameInput);
+
+    // ---- role / chrome ----------------------------------------------------
+    function setRole(r) {
+      role = r;
+      var el = $('role');
+      el.textContent = r;
+      el.className = 'pill' + (r === 'hosting' || r === 'connected' ? ' live' : '');
+      applyRoleUI();
+    }
+    function applyRoleUI() {
+      var host = role === 'hosting';
+      var listener = role === 'connected';
+      $('cfg').classList.toggle('hidden', !host);
+      $('usersWrap').classList.toggle('hidden', !(host || listener));
+      $('nameJoin').classList.toggle('hidden', host);
+      // listener transport reflects host-granted permissions
+      if (listener) {
+        $('play').disabled = !config.allowPause;
+        $('next').disabled = !(config.allowSkip || config.voteSkip);
+        $('prev').disabled = !config.allowSkip;
+        $('load').disabled = !config.allowQueue;
+        $('clear').disabled = true;
+        $('vote').classList.toggle('hidden', !(config.voteSkip && !config.allowSkip));
+      } else {
+        $('play').disabled = $('next').disabled = $('prev').disabled = false;
+        $('load').disabled = $('clear').disabled = false;
+        $('vote').classList.add('hidden');
+      }
+    }
 
     // ---- queue / playback (host-authoritative) ----------------------------
-    function setRole(r) { role = r; var el = document.getElementById('role'); el.textContent = r; el.className = 'pill' + (r === 'hosting' || r === 'connected' ? ' live' : ''); }
-    function fmtName(n) { return n.replace(/\.[a-z0-9]+$/i, ''); }
-
     function renderQueue() {
-      var ul = document.getElementById('queue');
+      var ul = $('queue');
       ul.innerHTML = '';
+      var canRemove = role !== 'connected' || config.allowRemove;
       queue.forEach(function (t, i) {
         var li = document.createElement('li');
         if (i === index) li.className = 'active';
         var idx = document.createElement('span'); idx.className = 'idx'; idx.textContent = (i + 1); li.appendChild(idx);
         var nm = document.createElement('span'); nm.className = 'name'; nm.textContent = fmtName(t.name); li.appendChild(nm);
-        li.addEventListener('dblclick', function () { playAt(i); });
+        if (t.temp) { var tg = document.createElement('span'); tg.className = 'tag'; tg.textContent = 'shared'; li.appendChild(tg); }
+        if (canRemove) {
+          var x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
+          x.addEventListener('click', function (e) { e.stopPropagation(); removeAt(i); });
+          li.appendChild(x);
+        }
+        if (role !== 'connected') li.addEventListener('dblclick', function () { playAt(i); });
         ul.appendChild(li);
       });
-      document.getElementById('nowTitle').textContent = index >= 0 && queue[index] ? fmtName(queue[index].name) : 'Nothing playing';
+      $('nowTitle').textContent = index >= 0 && queue[index] ? fmtName(queue[index].name) : 'Nothing playing';
     }
 
     function playAt(i) {
       if (i < 0 || i >= queue.length) return;
+      if (index !== i) votes = {};
       index = i;
+      hostStream();                 // ensure the graph exists before src changes
+      audio.muted = false;
       audio.src = queue[i].url;
       audio.play().catch(function () {});
       renderQueue();
-      pushQueue();
+      pushState();
     }
 
-    document.getElementById('play').addEventListener('click', function () {
-      if (audio.paused) { if (index < 0 && queue.length) playAt(0); else audio.play().catch(function () {}); }
+    function removeAt(i) {
+      if (role === 'connected') { if (config.allowRemove && ldc) ldc.send(JSON.stringify({ t: 'remove', id: queue[i].id })); return; }
+      var t = queue[i];
+      if (t.temp) releaseTemp(t.id); else if (t.url) URL.revokeObjectURL(t.url);
+      queue.splice(i, 1);
+      if (i === index) { index = -1; audio.removeAttribute('src'); }
+      else if (i < index) index--;
+      renderQueue();
+      pushState();
+    }
+
+    $('play').addEventListener('click', function () {
+      if (role === 'connected') { if (config.allowPause && ldc) ldc.send(JSON.stringify({ t: 'ctrl', action: playing ? 'pause' : 'play' })); return; }
+      if (audio.paused) { if (index < 0 && queue.length) playAt(0); else { hostStream(); audio.play().catch(function () {}); } }
       else audio.pause();
-      pushQueue();
+      pushState();
     });
-    document.getElementById('next').addEventListener('click', function () { if (index + 1 < queue.length) playAt(index + 1); });
-    document.getElementById('prev').addEventListener('click', function () { if (index > 0) playAt(index - 1); });
-    audio.addEventListener('ended', function () { if (index + 1 < queue.length) playAt(index + 1); });
-    audio.addEventListener('play', function () { document.getElementById('play').textContent = '⏸'; });
-    audio.addEventListener('pause', function () { document.getElementById('play').textContent = '▶'; });
+    $('next').addEventListener('click', function () {
+      if (role === 'connected') {
+        if (config.allowSkip && ldc) ldc.send(JSON.stringify({ t: 'ctrl', action: 'next' }));
+        else if (config.voteSkip && ldc) ldc.send(JSON.stringify({ t: 'vote' }));
+        return;
+      }
+      if (index + 1 < queue.length) playAt(index + 1);
+    });
+    $('prev').addEventListener('click', function () {
+      if (role === 'connected') { if (config.allowSkip && ldc) ldc.send(JSON.stringify({ t: 'ctrl', action: 'prev' })); return; }
+      if (index > 0) playAt(index - 1);
+    });
+    $('vote').addEventListener('click', function () { if (ldc && ldc.readyState === 'open') ldc.send(JSON.stringify({ t: 'vote' })); });
 
-    document.getElementById('clear').addEventListener('click', function () { queue = []; index = -1; audio.removeAttribute('src'); renderQueue(); pushQueue(); });
+    audio.addEventListener('ended', function () { if (role !== 'connected' && index + 1 < queue.length) playAt(index + 1); });
+    audio.addEventListener('play', function () { if (role !== 'connected') { playing = true; $('play').textContent = '⏸'; pushState(); } });
+    audio.addEventListener('pause', function () { if (role !== 'connected') { playing = false; $('play').textContent = '▶'; pushState(); } });
 
-    document.getElementById('load').addEventListener('click', async function () {
+    $('clear').addEventListener('click', function () {
+      if (role === 'connected') return;
+      queue.forEach(function (t) { if (t.temp) releaseTemp(t.id); else if (t.url) URL.revokeObjectURL(t.url); });
+      queue = []; index = -1; votes = {}; audio.removeAttribute('src'); renderQueue(); pushState();
+    });
+
+    $('load').addEventListener('click', async function () {
       var res = await w.files.open({ multiple: true, filters: [{ name: 'Audio', extensions: ['mp3', 'ogg', 'opus', 'flac', 'wav', 'm4a', 'aac'] }] });
       if (!res || !res.ok || !res.files) return;
+      if (role === 'connected') { for (var i = 0; i < res.files.length; i++) await uploadToHost(res.files[i]); return; }
       res.files.forEach(function (f) {
         var blob = new Blob([f.data]);
-        queue.push({ name: f.name, url: URL.createObjectURL(blob) });
+        queue.push({ id: rnd(), name: f.name, url: URL.createObjectURL(blob), temp: false });
       });
       renderQueue();
-      pushQueue();
-      if (index < 0 && queue.length) renderQueue();
+      pushState();
     });
+
+    // ---- host: temp store for received ("downloaded") files ---------------
+    function sweepTemp() {
+      var now = Date.now();
+      for (var i = temp.length - 1; i >= 0; i--) {
+        var t = temp[i];
+        if (!t.inQueue && t.evictAt && now >= t.evictAt) { URL.revokeObjectURL(t.url); temp.splice(i, 1); }
+      }
+    }
+    function cullTemp() {
+      temp.forEach(function (t) { URL.revokeObjectURL(t.url); });
+      temp = [];
+    }
+    function releaseTemp(id) {
+      var t = temp.find(function (x) { return x.id === id; });
+      if (t) { t.inQueue = false; t.evictAt = Date.now() + TEMP_GRACE; }
+    }
+    setInterval(sweepTemp, 30 * 1000);
+
+    // ---- host: sync state to every connected listener ---------------------
+    function connectedPeers() { return hostPeers.filter(function (p) { return p.connected; }); }
+    function votesNeeded() { var n = connectedPeers().length; return Math.max(1, Math.floor(n / 2) + 1); }
+    function voteState() { return { count: Object.keys(votes).length, needed: votesNeeded() }; }
+    function peerList() {
+      var list = [{ id: 'host', name: selfName + ' (host)', host: true }];
+      connectedPeers().forEach(function (p) { list.push({ id: p.id, name: p.name || 'Guest', host: false }); });
+      return list;
+    }
+    function pushState() {
+      if (role !== 'hosting') return;
+      var msg = JSON.stringify({
+        t: 'state',
+        queue: queue.map(function (t) { return { id: t.id, name: t.name, temp: !!t.temp }; }),
+        index: index, playing: playing, config: config, peers: peerList(), votes: voteState(),
+      });
+      connectedPeers().forEach(function (p) { try { if (p.dc && p.dc.readyState === 'open') p.dc.send(msg); } catch (e) {} });
+      renderUsers(peerList());
+      renderVotes(voteState());
+    }
+    function tallyVote(voterId) {
+      votes[voterId] = true;
+      if (Object.keys(votes).length >= votesNeeded()) { votes = {}; if (index + 1 < queue.length) playAt(index + 1); }
+      else pushState();
+    }
+
+    function renderUsers(peers) {
+      $('userCount').textContent = Math.max(0, peers.length - 1);
+      var ul = $('users'); ul.innerHTML = '';
+      peers.forEach(function (p) {
+        var li = document.createElement('li');
+        var nm = document.createElement('span'); nm.className = 'name'; nm.textContent = p.name; li.appendChild(nm);
+        if (p.host) { var tg = document.createElement('span'); tg.className = 'tag'; tg.textContent = 'host'; li.appendChild(tg); }
+        ul.appendChild(li);
+      });
+    }
+    function renderVotes(v) {
+      var btn = $('vote');
+      $('voteCount').textContent = v && v.count ? '(' + v.count + '/' + v.needed + ')' : '';
+      if (role === 'hosting' && v && v.count) $('peers').textContent = 'skip votes ' + v.count + '/' + v.needed;
+    }
+
+    // ---- host: per-peer data-channel handling -----------------------------
+    function wireHostPeer(peer) {
+      peer.dc.binaryType = 'arraybuffer';
+      peer.dc.onopen = function () { peer.connected = true; pushState(); };
+      peer.dc.onclose = function () { peer.connected = false; if (peer.rx) { peer.rx = null; } pushState(); };
+      peer.dc.onmessage = function (e) { onHostMessage(peer, e.data); };
+    }
+    function onHostMessage(peer, data) {
+      if (typeof data !== 'string') { // binary upload chunk
+        if (peer.rx) { peer.rx.chunks.push(new Uint8Array(data)); peer.rx.got += data.byteLength; }
+        return;
+      }
+      var m; try { m = JSON.parse(data); } catch (e) { return; }
+      if (m.t === 'hello') { peer.name = String(m.name || '').slice(0, 40) || peer.name; pushState(); return; }
+      if (m.t === 'ctrl') {
+        if (m.action === 'play' && config.allowPause) { if (index < 0 && queue.length) playAt(0); else { hostStream(); audio.play().catch(function () {}); } }
+        else if (m.action === 'pause' && config.allowPause) audio.pause();
+        else if (m.action === 'next' && config.allowSkip) { if (index + 1 < queue.length) playAt(index + 1); }
+        else if (m.action === 'prev' && config.allowSkip) { if (index > 0) playAt(index - 1); }
+        return;
+      }
+      if (m.t === 'vote') { if (config.voteSkip) tallyVote(peer.id); return; }
+      if (m.t === 'remove') {
+        if (!config.allowRemove) return;
+        var i = queue.findIndex(function (t) { return t.id === m.id; });
+        if (i >= 0) removeAt(i);
+        return;
+      }
+      if (m.t === 'add') {
+        if (!config.allowQueue) { peer.dc.send(JSON.stringify({ t: 'addReject', cid: m.cid, reason: 'Queueing is disabled' })); return; }
+        sweepTemp();
+        if (+m.size > MAX_UPLOAD) { peer.dc.send(JSON.stringify({ t: 'addReject', cid: m.cid, reason: 'File too large (max 60 MB)' })); return; }
+        if (temp.length >= MAX_TEMP) { peer.dc.send(JSON.stringify({ t: 'addReject', cid: m.cid, reason: 'Host shared-file limit reached (10)' })); return; }
+        peer.rx = { name: String(m.name || 'track').slice(0, 120), size: +m.size || 0, mime: m.mime || '', chunks: [], got: 0 };
+        peer.dc.send(JSON.stringify({ t: 'addOk', cid: m.cid }));
+        return;
+      }
+      if (m.t === 'addEnd') {
+        if (!peer.rx) return;
+        var rx = peer.rx; peer.rx = null;
+        var blob = new Blob(rx.chunks, { type: rx.mime || 'audio/mpeg' });
+        var id = rnd();
+        temp.push({ id: id, name: rx.name, url: URL.createObjectURL(blob), size: blob.size, inQueue: true, evictAt: null });
+        queue.push({ id: id, name: rx.name, url: temp[temp.length - 1].url, temp: true });
+        renderQueue();
+        pushState();
+        return;
+      }
+    }
+
+    // ---- listener: apply host state, upload files -------------------------
+    function applyState(s) {
+      config = s.config || config;
+      queue = (s.queue || []).map(function (t) { return { id: t.id, name: t.name, temp: t.temp }; });
+      index = s.index; playing = !!s.playing;
+      $('play').textContent = playing ? '⏸' : '▶';
+      renderQueue();
+      renderUsers(s.peers || []);
+      renderVotes(s.votes);
+      applyRoleUI();
+    }
+    function uploadToHost(f) {
+      return new Promise(function (resolve) {
+        if (!ldc || ldc.readyState !== 'open') return resolve();
+        if (f.size > MAX_UPLOAD) { alert(f.name + ' is too large (max 60 MB).'); return resolve(); }
+        var cid = rnd();
+        upload = { cid: cid, file: f, resolve: resolve };
+        ldc.send(JSON.stringify({ t: 'add', cid: cid, name: f.name, size: f.size, mime: '' }));
+        // resolved when host accepts (then we stream) + finishes, or rejects
+      });
+    }
+    async function sendUploadChunks(f) {
+      var data = f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data);
+      var CH = 16 * 1024;
+      for (var o = 0; o < data.byteLength; o += CH) {
+        while (ldc.bufferedAmount > 4 * 1024 * 1024) { await new Promise(function (r) { setTimeout(r, 20); }); }
+        ldc.send(data.subarray(o, o + CH));
+      }
+      ldc.send(JSON.stringify({ t: 'addEnd' }));
+    }
+    function wireListener(channel) {
+      ldc = channel;
+      ldc.binaryType = 'arraybuffer';
+      ldc.onopen = function () { setRole('connected'); ldc.send(JSON.stringify({ t: 'hello', name: selfName })); };
+      ldc.onmessage = async function (e) {
+        if (typeof e.data !== 'string') return;
+        var m; try { m = JSON.parse(e.data); } catch (err) { return; }
+        if (m.t === 'state') { applyState(m); return; }
+        if (m.t === 'addOk' && upload && upload.cid === m.cid) { var u = upload; await sendUploadChunks(u.file); u.resolve(); if (upload === u) upload = null; return; }
+        if (m.t === 'addReject' && upload && upload.cid === m.cid) { alert('Queue add rejected: ' + (m.reason || '')); upload.resolve(); upload = null; return; }
+      };
+    }
 
     // ---- WebRTC signalling (manual copy/paste, serverless) ----------------
     var RTC = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-    var enc = function (obj) { return btoa(unescape(encodeURIComponent(JSON.stringify(obj)))); };
-    var dec = function (s) { return JSON.parse(decodeURIComponent(escape(atob(s.trim())))); };
+    // deflate-compressed + base64url keeps invite/answer codes as short as a
+    // serverless copy-paste flow reasonably allows.
+    var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    function toB64u(bytes) {
+      var s = '', i;
+      for (i = 0; i + 2 < bytes.length; i += 3) {
+        s += B64[bytes[i] >> 2] + B64[((bytes[i] & 3) << 4) | (bytes[i + 1] >> 4)] + B64[((bytes[i + 1] & 15) << 2) | (bytes[i + 2] >> 6)] + B64[bytes[i + 2] & 63];
+      }
+      if (i < bytes.length) {
+        s += B64[bytes[i] >> 2];
+        if (i + 1 < bytes.length) { s += B64[((bytes[i] & 3) << 4) | (bytes[i + 1] >> 4)] + B64[(bytes[i + 1] & 15) << 2]; }
+        else { s += B64[(bytes[i] & 3) << 4]; }
+      }
+      return s;
+    }
+    function fromB64u(str) {
+      var lut = {}, i; for (i = 0; i < B64.length; i++) lut[B64[i]] = i;
+      var out = [], buf = 0, bits = 0;
+      for (i = 0; i < str.length; i++) {
+        var c = lut[str[i]]; if (c === undefined) continue;
+        buf = (buf << 6) | c; bits += 6;
+        if (bits >= 8) { bits -= 8; out.push((buf >> bits) & 0xff); }
+      }
+      return new Uint8Array(out);
+    }
+    async function deflate(bytes) {
+      var cs = new CompressionStream('deflate-raw');
+      var wr = cs.writable.getWriter(); wr.write(bytes); wr.close();
+      return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+    }
+    async function inflate(bytes) {
+      var ds = new DecompressionStream('deflate-raw');
+      var wr = ds.writable.getWriter(); wr.write(bytes); wr.close();
+      return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+    }
+    function slimSdp(sdp) {
+      // Drop TCP ICE candidates: UDP host/srflx candidates carry the connection,
+      // so this shortens the code with no practical effect on connectivity.
+      return sdp.split(/\r\n|\n/).filter(function (l) { return !(/^a=candidate:/i.test(l) && / tcp /i.test(l)); }).join('\r\n');
+    }
+    async function enc(obj) {
+      // keep only the fields the peer needs, trim, then deflate
+      var slim = { t: obj.type, s: slimSdp(obj.sdp) };
+      return toB64u(await deflate(new TextEncoder().encode(JSON.stringify(slim))));
+    }
+    async function dec(s) {
+      var o = JSON.parse(new TextDecoder().decode(await inflate(fromB64u(s.trim()))));
+      return { type: o.t, sdp: o.s };
+    }
 
     function gather(p) {
       return new Promise(function (resolve) {
@@ -154,75 +557,139 @@
       });
     }
 
-    function streamFromAudio() {
-      var s = audio.captureStream ? audio.captureStream() : (audio.mozCaptureStream ? audio.mozCaptureStream() : null);
-      return s;
-    }
-
-    function wireDc(channel) {
-      dc = channel;
-      dc.onopen = function () { setRole(role === 'hosting' ? 'hosting' : 'connected'); pushQueue(); };
-      dc.onmessage = function (e) {
-        try {
-          var m = JSON.parse(e.data);
-          if (m.type === 'queue') { // listener mirrors the host's queue (read-only)
-            queue = (m.items || []).map(function (n) { return { name: n, url: null }; });
-            index = m.index; renderQueue();
-            document.getElementById('play').textContent = m.playing ? '⏸' : '▶';
-          }
-        } catch (err) {}
+    // ---- Host: create an invite per friend --------------------------------
+    async function createHostPeer(inviteId) {
+      if (role === 'idle') cullTemp();        // session start: drop stale shared files
+      var peer = { id: rnd(), inviteId: inviteId || null, pc: new RTCPeerConnection(RTC), dc: null, name: '', connected: false, rx: null, applied: false };
+      peer.dc = peer.pc.createDataChannel('q');
+      wireHostPeer(peer);
+      peer.pc.onconnectionstatechange = function () {
+        if (['failed', 'disconnected', 'closed'].indexOf(peer.pc.connectionState) >= 0) {
+          peer.connected = false; if (peer.rx) peer.rx = null; pushState();
+        }
       };
-    }
-
-    function pushQueue() {
-      if (role !== 'hosting' || !dc || dc.readyState !== 'open') return;
-      dc.send(JSON.stringify({ type: 'queue', items: queue.map(function (t) { return t.name; }), index: index, playing: !audio.paused }));
-    }
-
-    function peers(n) { document.getElementById('peers').textContent = n; }
-
-    // Host
-    document.getElementById('startHost').addEventListener('click', async function () {
-      pc = new RTCPeerConnection(RTC);
-      pc.onconnectionstatechange = function () { peers(pc.connectionState === 'connected' ? '● listener connected' : pc.connectionState); };
-      wireDc(pc.createDataChannel('q'));
-      var s = streamFromAudio();
-      if (s) s.getAudioTracks().forEach(function (tr) { pc.addTrack(tr, s); });
-      var offer = await pc.createOffer(); await pc.setLocalDescription(offer); await gather(pc);
-      document.getElementById('hostInvite').value = enc(pc.localDescription);
-      document.getElementById('acceptAnswer').disabled = false;
+      var sd = hostStream();
+      sd.stream.getAudioTracks().forEach(function (tr) { peer.pc.addTrack(tr, sd.stream); });
+      var offer = await peer.pc.createOffer(); await peer.pc.setLocalDescription(offer); await gather(peer.pc);
+      hostPeers.push(peer);
       setRole('hosting');
-    });
-    document.getElementById('acceptAnswer').addEventListener('click', async function () {
-      try { await pc.setRemoteDescription(dec(document.getElementById('hostAnswer').value)); } catch (e) { alert('Bad answer code'); }
+      return peer;
+    }
+
+    $('startHost').addEventListener('click', async function () {
+      var peer = await createHostPeer(null);
+      awaiting = peer;
+      $('hostInvite').value = await enc(peer.pc.localDescription);
+      $('acceptAnswer').disabled = false;
     });
 
-    // Join
-    document.getElementById('makeAnswer').addEventListener('click', async function () {
+    // Quick connect: hand the invite to our content script, which posts it into
+    // the open Discord chat. The answer comes back through p2p:response below.
+    $('discordInvite').addEventListener('click', async function () {
+      var inviteId = rid();
+      var peer = await createHostPeer(inviteId);
+      myInvites[inviteId] = peer;
+      var code = await enc(peer.pc.localDescription);
+      w.broadcast('p2p:mine', { inviteId: inviteId });   // so our own machine won't offer us Join
+      w.broadcast('p2p:post', { text: 'plugin://p2p-' + inviteId + '~' + code });
+      $('dcStatus').textContent = 'invite posted — waiting for a listener…';
+    });
+    $('acceptAnswer').addEventListener('click', async function () {
+      if (!awaiting) return;
       try {
-        pc = new RTCPeerConnection(RTC);
-        pc.ondatachannel = function (e) { wireDc(e.channel); };
-        pc.ontrack = function (e) { audio.srcObject = e.streams[0]; audio.play().catch(function () {}); setRole('connected'); };
-        pc.onconnectionstatechange = function () { peers(pc.connectionState); };
-        await pc.setRemoteDescription(dec(document.getElementById('joinInvite').value));
-        var ans = await pc.createAnswer(); await pc.setLocalDescription(ans); await gather(pc);
-        document.getElementById('joinAnswer').value = enc(pc.localDescription);
+        await awaiting.pc.setRemoteDescription(await dec($('hostAnswer').value));
+        $('hostAnswer').value = '';
+        $('hostInvite').value = '';
+        $('acceptAnswer').disabled = true;
+        awaiting = null;
+      } catch (e) { alert('Bad answer code'); }
+    });
+
+    // ---- Join: become a listener ------------------------------------------
+    $('makeAnswer').addEventListener('click', async function () {
+      try {
+        ensureActx();   // create+resume inside the click gesture, before ontrack fires
+        lpc = new RTCPeerConnection(RTC);
+        lpc.ondatachannel = function (e) { wireListener(e.channel); };
+        lpc.ontrack = function (e) { listenerPlay(e.streams[0]); };
+        lpc.onconnectionstatechange = function () {
+          if (['failed', 'disconnected', 'closed'].indexOf(lpc.connectionState) >= 0 && role === 'connected') { setRole('idle'); $('peers').textContent = 'disconnected'; }
+        };
+        await lpc.setRemoteDescription(await dec($('joinInvite').value));
+        var ans = await lpc.createAnswer(); await lpc.setLocalDescription(ans); await gather(lpc);
+        $('joinAnswer').value = await enc(lpc.localDescription);
         setRole('joining');
       } catch (e) { alert('Bad invite code'); }
     });
 
-    // tabs + chrome
-    function tab(which) {
-      document.getElementById('tabHost').className = which === 'host' ? 'on' : '';
-      document.getElementById('tabJoin').className = which === 'join' ? 'on' : '';
-      document.getElementById('segHost').className = 'seg' + (which === 'host' ? ' on' : '');
-      document.getElementById('segJoin').className = 'seg' + (which === 'join' ? ' on' : '');
+    // ---- Discord-relayed signalling (content script posts/reads the codes) -
+    async function answerInvite(inviteId, code) {
+      ensureActx();
+      if (lpc) { try { lpc.close(); } catch (e) {} }
+      lpc = new RTCPeerConnection(RTC);
+      lpc.ondatachannel = function (e) { wireListener(e.channel); };
+      lpc.ontrack = function (e) { listenerPlay(e.streams[0]); };
+      lpc.onconnectionstatechange = function () {
+        if (['failed', 'disconnected', 'closed'].indexOf(lpc.connectionState) >= 0 && role === 'connected') { setRole('idle'); $('peers').textContent = 'disconnected'; }
+      };
+      await lpc.setRemoteDescription(await dec(code));
+      var ans = await lpc.createAnswer(); await lpc.setLocalDescription(ans); await gather(lpc);
+      w.broadcast('p2p:post', { text: 'plugin://p2p-response-' + inviteId + '~' + (await enc(lpc.localDescription)) });
+      setRole('joining');
     }
-    document.getElementById('tabHost').addEventListener('click', function () { tab('host'); });
-    document.getElementById('tabJoin').addEventListener('click', function () { tab('join'); });
-    document.getElementById('close').addEventListener('click', function () { w.window.close(); });
+    w.on('message:p2p:join', async function (d) {
+      d = d || {};
+      if (!d.inviteId || !d.code) return;
+      if (myInvites[d.inviteId]) return;        // never join an invite we created
+      if (joinedInvites[d.inviteId]) return;
+      joinedInvites[d.inviteId] = true;
+      try { await answerInvite(d.inviteId, d.code); } catch (e) { joinedInvites[d.inviteId] = false; }
+    });
+    w.on('message:p2p:response', async function (d) {
+      d = d || {};
+      var peer = myInvites[d.inviteId];
+      if (!peer || peer.applied || !d.code) return;
+      try {
+        await peer.pc.setRemoteDescription(await dec(d.code));
+        peer.applied = true; delete myInvites[d.inviteId];
+        $('dcStatus').textContent = 'listener connected ✓';
+      } catch (e) {}
+    });
 
+    // ---- tabs + chrome ----------------------------------------------------
+    function tab(which) {
+      $('tabHost').className = which === 'host' ? 'on' : '';
+      $('tabJoin').className = which === 'join' ? 'on' : '';
+      $('segHost').className = 'seg' + (which === 'host' ? ' on' : '');
+      $('segJoin').className = 'seg' + (which === 'join' ? ' on' : '');
+    }
+    $('tabHost').addEventListener('click', function () { tab('host'); });
+    $('tabJoin').addEventListener('click', function () { tab('join'); });
+    $('close').addEventListener('click', function () { w.window.close(); });
+
+    // session end: free every received file
+    window.addEventListener('beforeunload', cullTemp);
+    // browsers may park the AudioContext until a gesture — recover on any click
+    document.addEventListener('click', function () { if (actx && actx.state === 'suspended') actx.resume(); });
+
+    // ---- session config checkboxes ----------------------------------------
+    [['cAllowPause', 'allowPause'], ['cAllowSkip', 'allowSkip'], ['cAllowQueue', 'allowQueue'], ['cAllowRemove', 'allowRemove'], ['cVoteSkip', 'voteSkip']].forEach(function (pair) {
+      $(pair[0]).addEventListener('change', function (e) { config[pair[1]] = e.target.checked; pushState(); });
+    });
+
+    // ---- collapsible menus ------------------------------------------------
+    function collapser(toggleId, bodyId, chevId) {
+      $(toggleId).addEventListener('click', function () {
+        var collapsed = $(bodyId).classList.toggle('collapsed');
+        $(chevId).textContent = collapsed ? '▸' : '▾';
+      });
+    }
+    collapser('cfgToggle', 'cfgBody', 'cfgChev');
+    collapser('manualToggle', 'manualBody', 'manualChev');
+
+    applyVolume();
     renderQueue();
+    applyRoleUI();
   </script>
 </body>
 </html>

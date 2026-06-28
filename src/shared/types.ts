@@ -62,6 +62,7 @@ export interface UiConfig {
   sidebarWidth: number;
   theme: Theme;
   accent: string;
+  locale: string;
 }
 
 export interface GlobalConfig {
@@ -71,6 +72,7 @@ export interface GlobalConfig {
   startMinimized: boolean;
   autoLockMinutes: number; // 0 = off
   autoHibernateMinutes: number; // 0 = off
+  pluginStorageMb: number; // per-plugin storage quota, in MB
   pushToTalk: {
     enabled: boolean;
     key: string;
@@ -163,7 +165,7 @@ export const defaultAccountColors = [
 
 export function defaultConfig(): AppConfig {
   return {
-    ui: { sidebarSide: 'right', sidebarCollapsed: false, sidebarWidth: 248, theme: 'dark', accent: '#5865F2' },
+    ui: { sidebarSide: 'right', sidebarCollapsed: false, sidebarWidth: 248, theme: 'dark', accent: '#5865F2', locale: 'en_US' },
     global: {
       dnd: false,
       hidePreviews: false,
@@ -171,6 +173,7 @@ export function defaultConfig(): AppConfig {
       startMinimized: false,
       autoLockMinutes: 0,
       autoHibernateMinutes: 0,
+      pluginStorageMb: 5,
       pushToTalk: {
         enabled: false,
         key: 'Space',

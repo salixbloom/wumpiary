@@ -4,9 +4,11 @@
 // permanent account suspension. This plugin is unsupported; use it responsibly
 // and at your own risk.
 //
-// Flow: register each macro's hotkey -> on press, grab the clipboard and
-// broadcast the macro to the content scripts -> the (single) VISIBLE Discord
-// view runs it against the `macro` API.
+// Flow: register each macro's hotkey -> on press, broadcast the macro to the
+// content scripts -> the (single) VISIBLE Discord view runs it against the
+// `macro` API. Clipboard is fire-only here: a macro can ask us to trigger the OS
+// copy/paste on the focused field, but the plugin can never read or set its
+// contents.
 
 module.exports = (api) => {
   let registered = [];
@@ -32,20 +34,19 @@ module.exports = (api) => {
   const offHotkey = api.on('hotkey', async ({ accelerator }) => {
     const m = macros().find((x) => x.hotkey === accelerator);
     if (!m) return;
-    let clip = '';
-    try { clip = await api.clipboard.readText(); } catch (e) { /* ignore */ }
-    api.broadcast('macro:run', { name: m.name, code: m.code, clipboard: clip });
+    api.broadcast('macro:run', { name: m.name, code: m.code });
   });
 
-  // The content script can ask us to write the clipboard (macro.setClipboard).
-  const offClip = api.on('message:macro:clip', (text) => {
-    try { api.clipboard.writeText(String(text)); } catch (e) { /* ignore */ }
-  });
+  // A macro can ask us to fire the OS copy/paste on the focused Discord field
+  // (macro.copy() / macro.paste()). Clipboard is fire-only — we cannot read or
+  // set its contents — so these expose no data to the plugin.
+  const offCopy = api.on('message:macro:copy', () => { try { api.clipboard.copy(); } catch (e) { /* ignore */ } });
+  const offPaste = api.on('message:macro:paste', () => { try { api.clipboard.paste(); } catch (e) { /* ignore */ } });
 
   // The editor saved changes — re-bind hotkeys.
   const offReload = api.on('message:macro:reload', () => setup());
 
   setup();
 
-  return () => { offHotkey(); offClip(); offReload(); unregisterAll(); };
+  return () => { offHotkey(); offCopy(); offPaste(); offReload(); unregisterAll(); };
 };

@@ -19,9 +19,11 @@ wumpiary.on('message:macro:run', function (m) {
     // dom access (read-only convenience)
     query: function (sel) { return wumpiary.query(sel); },
     queryAll: function (sel) { return wumpiary.queryAll(sel); },
-    // clipboard (provided by the headless half on trigger)
-    clipboard: (m && m.clipboard) || '',
-    setClipboard: function (s) { wumpiary.broadcast('macro:clip', String(s)); },
+    // clipboard is fire-only: trigger the OS copy/paste on the focused field
+    // (e.g. focusMessageBox() then paste()). A macro can never read or set the
+    // clipboard's contents.
+    copy: function () { wumpiary.broadcast('macro:copy'); return true; },
+    paste: function () { wumpiary.broadcast('macro:paste'); return true; },
     log: function () { wumpiary.log.apply(null, arguments); },
   };
   try {

@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { api } from './store';
 import { useSidebarAnim } from './useSidebarAnim';
+import { useT } from './i18n';
 import { COLLAPSED_SIDEBAR_WIDTH } from '../shared/types';
 import type { AccountConfig, AccountRuntime, AppState, ConnectionState } from '../shared/types';
 
@@ -11,6 +12,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
+  const t = useT();
   const ui = state.config.ui;
   const collapsed = ui.sidebarCollapsed;
   const order = state.config.accountsOrder;
@@ -45,13 +47,13 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
   const footActions: FootAction[] = [
     {
       key: 'dnd',
-      title: 'Do Not Disturb (mute all)',
+      title: t('sidebar.dnd'),
       className: `icon-btn ${state.config.global.dnd ? 'on' : ''}`,
       label: state.config.global.dnd ? '🔕' : '🔔',
       onClick: () => api.patchGlobal({ dnd: !state.config.global.dnd }),
     },
-    { key: 'settings', title: 'Settings', className: 'icon-btn', label: '⚙', onClick: onOpenSettings },
-    { key: 'lock', title: 'Lock', className: 'icon-btn', label: '🔒', onClick: () => api.lock(), disabled: !state.hasVault },
+    { key: 'settings', title: t('sidebar.settings'), className: 'icon-btn', label: '⚙', onClick: onOpenSettings },
+    { key: 'lock', title: t('sidebar.lock'), className: 'icon-btn', label: '🔒', onClick: () => api.lock(), disabled: !state.hasVault },
   ];
 
   return (
@@ -67,11 +69,11 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
       } as React.CSSProperties}
     >
       <div className="sidebar-head">
-        <button className="icon-btn toggle-btn" title="Toggle sidebar" onClick={toggleSidebar}>
+        <button className="icon-btn toggle-btn" title={t('sidebar.toggle')} onClick={toggleSidebar}>
           {ui.sidebarSide === 'right' ? (collapsed ? '‹' : '›') : collapsed ? '›' : '‹'}
         </button>
         {(!collapsed || collapsing || expanding) && <Brand walk={expanding} />}
-        <button className="inbox-btn" title="Inbox — notifications from all accounts" onClick={onOpenInbox}>
+        <button className="inbox-btn" title={t('sidebar.inbox')} onClick={onOpenInbox}>
           <InboxIcon />
           {state.activity.length > 0 && (
             <span className="inbox-badge">{state.activity.length > 99 ? '99+' : state.activity.length}</span>
@@ -95,9 +97,9 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
             onDrop={() => drop(id)}
           />
         ))}
-        <button className="perch add" onClick={() => api.addAccount()} title="Add account">
+        <button className="perch add" onClick={() => api.addAccount()} title={t('sidebar.addAccount')}>
           <span className="avatar add-avatar"><PlusIcon /></span>
-          {!collapsed && <span className="perch-label">Add account</span>}
+          {!collapsed && <span className="perch-label">{t('sidebar.addAccount')}</span>}
         </button>
       </div>
 
@@ -145,7 +147,7 @@ export function Sidebar({ state, onOpenSettings, onOpenInbox }: SidebarProps) {
             )}
             <button
               className={`icon-btn foot-more ${footOpen ? 'open' : ''}`}
-              title="More"
+              title={t('sidebar.more')}
               onClick={() => setFootOpen((o) => !o)}
             >
               ⋯
@@ -189,14 +191,17 @@ interface FootAction {
   disabled?: boolean;
 }
 
-const STATUS_LABEL: Record<ConnectionState, string> = {
-  connected: 'Connected',
-  reconnecting: 'Reconnecting…',
-  offline: 'Offline',
-  hibernated: 'Hibernated (not notifying)',
-  'signed-out': 'Signed out',
-  loading: 'Loading…',
-};
+function statusLabel(conn: ConnectionState, t: (key: string) => string): string {
+  const map: Record<ConnectionState, string> = {
+    connected: t('sidebar.status.connected'),
+    reconnecting: t('sidebar.status.reconnecting'),
+    offline: t('sidebar.status.offline'),
+    hibernated: t('sidebar.status.hibernated'),
+    'signed-out': t('sidebar.status.signedOut'),
+    loading: t('sidebar.status.loading'),
+  };
+  return map[conn];
+}
 
 function Perch({
   account, runtime, active, collapsed, collapsing, index, onClick, onContext, onDragStart, onDrop,
@@ -212,6 +217,7 @@ function Perch({
   onDragStart: () => void;
   onDrop: () => void;
 }) {
+  const t = useT();
   const conn = runtime?.connection ?? 'offline';
   const mentions = runtime?.mentions ?? 0;
   const unread = runtime?.unread ?? 0;
@@ -239,14 +245,14 @@ function Perch({
     >
       <div className={`avatar-wrap ${notifying ? 'shake' : ''}`}>
         <Avatar account={account} />
-        <span className={`dot ${conn}`} title={STATUS_LABEL[conn]} />
-        {account.notifications.muted && <span className="muted-overlay" title="Muted">🔇</span>}
+        <span className={`dot ${conn}`} title={statusLabel(conn, t)} />
+        {account.notifications.muted && <span className="muted-overlay" title={t('sidebar.muted')}>🔇</span>}
         {showBubble && <span className="pill mention mini">{mentions}</span>}
       </div>
       {showRow && (
         <div className="perch-body">
           <span className="perch-label">{account.nickname}</span>
-          <span className="perch-sub">{STATUS_LABEL[conn]}</span>
+          <span className="perch-sub">{statusLabel(conn, t)}</span>
         </div>
       )}
       {showRow && (

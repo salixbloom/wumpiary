@@ -1,8 +1,8 @@
 # Macro Manager
 
 Write scripted macros bound to global hotkeys that drive the **active** Discord
-view — focus the message box, type, send, click elements, read/write the
-clipboard, and more.
+view — focus the message box, type, send, click elements, trigger copy/paste,
+and more.
 
 > ⚠ **Account automation is strictly prohibited by Discord and can result in
 > permanent account suspension.** This plugin is provided as-is and unsupported.
@@ -12,7 +12,7 @@ clipboard, and more.
 
 1. Enable **Macro Manager** in Settings → Plugins.
 2. Grant **discord-view** (to act in Discord), **hotkeys** (to trigger macros),
-   and **clipboard** (optional, for clipboard actions).
+   and **clipboard** (optional, to let macros trigger copy/paste).
 3. Click **Open Macro Editor** on the plugin card.
 
 ## Writing a macro
@@ -34,8 +34,9 @@ Your script runs with a `macro` object:
 - `macro.click(selector)` — click a matching element.
 - `await macro.wait(ms)` — pause (scripts are async).
 - `macro.getSelection()` — the currently selected text.
-- `macro.clipboard` — the clipboard text at trigger time.
-- `macro.setClipboard(text)` — write the clipboard.
+- `macro.copy()` — fire the OS copy on the focused field (e.g. after selecting).
+- `macro.paste()` — fire the OS paste into the focused field (e.g. the message
+  box). Clipboard is fire-only: a macro can never read or set its contents.
 - `macro.query(sel)` / `macro.queryAll(sel)` — read the DOM.
 - `macro.log(...)` — log to wumpiary's console.
 
